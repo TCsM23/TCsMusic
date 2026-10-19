@@ -1,0 +1,47 @@
+<section class="scales-detail" id="scales-detail" aria-live="polite">
+  <div class="scales-detail-head">
+    <div>
+      <h2 class="scales-detail-title" id="scales-title">Major</h2>
+      <p class="scales-detail-character" id="scales-character"></p>
+    </div>
+    <div class="scales-detail-actions">
+      <button type="button" class="scales-button scales-button-primary" id="scales-play">▶ Play up</button>
+      <button type="button" class="scales-button" id="scales-play-down">▶ Play down</button>
+      <a class="scales-button" id="scales-studio" href="{% url 'chords:studio' %}">Open in Studio</a>
+    </div>
+  </div>
+  <dl class="scales-facts">
+    <div><dt>Notes</dt><dd id="scales-notes"></dd></div>
+    <div><dt>Step pattern</dt><dd id="scales-pattern"></dd></div>
+    <div><dt>Different keys</dt><dd id="scales-trans"></dd></div>
+  </dl>
+  <p class="scales-note">The scale is shown on the keyboard above: dotted keys are in it, the gold dot is the root. Change the key with the Key menu at the top.</p>
+  <p class="scales-symmetry" id="scales-symmetry" hidden></p>
+  <svg class="scales-staff" id="scales-staff" viewBox="0 0 640 140" role="img" aria-label="Scale on a staff"></svg>
+  <div id="scales-chords-block">
+    <h3 class="scales-subheading">Chords it makes</h3>
+    <p class="scales-note">Stack every other note of the scale and you get one chord per step. Click one to hear it.</p>
+    <div class="scales-chords" id="scales-chords"></div>
+  </div>
+</section>
+
+<div id="scales-groups"></div>
+
+<section class="scales-section" id="scales-compare-section">
+  <h2 class="scales-heading">Same root, seven moods</h2>
+  <p class="scales-note">All seven modes from the key you picked, brightest to darkest. Notes that differ from the major scale are marked.</p>
+  <div class="scales-compare" id="scales-compare"></div>
+</section>
+
+<section class="scales-section" id="tonic">
+  <h2 class="scales-heading">Tonics: the home note</h2>
+  <div class="scales-tonic-grid">
+    <div>
+      <p>The <strong>tonic</strong> is the note a scale is named after, the one that feels like home. The <strong>tonic chord</strong> is the chord built on it. Tunes usually start there, and end there too.</p>
+      <p>Chords in a key do three jobs. <strong>Tonic (T)</strong> chords feel settled. <strong>Subdominant (S)</strong> chords lift away from home. <strong>Dominant (D)</strong> chords create tension that wants to fall back home.</p>
+      <p><strong>Relative</strong> keys share the same notes but start in a different place, like C major and A minor. <strong>Parallel</strong> keys share the same tonic but use different notes, like C major and C minor.</p>
+      <p>Symmetrical scales (whole-tone, diminished, augmented, chromatic) repeat their own pattern, so no note stands out as the home. Any of their notes can act as the root, and that is why they sound like they are floating.</p>
+    </div>
+    <div class="scales-tonic-live" id="scales-tonic-live"></div>
+  </div>
+</section>

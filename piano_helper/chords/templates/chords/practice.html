@@ -7,7 +7,7 @@
   <div class="practice-top-grid">
     <div class="practice-top-intro">
       <h1 class="practice-page-title">Practice</h1>
-      <p class="practice-page-intro">Two habits from the 30-Year Shortcut: train your ears before your eyes, and slow down to speed up.</p>
+      <p class="practice-page-intro">Train your ears and your timing, then play along with real pieces. Two habits from the 30-Year Shortcut: ears before eyes, and slow down to speed up.</p>
     </div>
     <ul class="practice-top-tips">
       <li><strong>Ears over eyes</strong> Name the chord before the keys light up.</li>
@@ -15,79 +15,31 @@
     </ul>
   </div>
 
-  <div class="practice-grid">
-    <section class="practice-ear-section">
-      <h2 class="practice-ear-heading">Ear trainer</h2>
-      <p class="practice-ear-help" id="practice-ear-help">
-        You hear one chord with the keys dark. Is it major (bright) or minor (darker)?
-      </p>
-
-      <div class="practice-ear-controls">
-        <label>Quiz
-          <select id="practice-ear-mode">
-            <option value="majmin">Major or minor?</option>
-            <option value="number">Which number?</option>
-          </select>
-        </label>
-        <label>Key
-          <select id="practice-ear-key">
-            {% for note in note_names %}<option value="{{ note }}">{{ note }}</option>{% endfor %}
-          </select>
-        </label>
-      </div>
-      <div class="practice-ear-controls">
-        <button type="button" id="practice-ear-new" class="practice-button">New question</button>
-        <button type="button" id="practice-ear-replay" class="practice-button" disabled>Replay</button>
-        <button type="button" id="practice-ear-context" class="practice-button" disabled>Hear 1 first</button>
-      </div>
-
-      <div id="practice-ear-answers" class="practice-ear-answers"></div>
-      <p id="practice-ear-feedback" class="practice-ear-feedback" aria-live="polite"></p>
-
-      <p class="practice-ear-scoreline">
-        <span id="practice-ear-score"></span>
-        <span id="practice-ear-streak"></span>
-        <button type="button" id="practice-ear-reset" class="practice-button">Reset score</button>
-      </p>
-    </section>
-
-    <section class="practice-metro-section">
-      <h2 class="practice-metro-heading">Slow-down-to-speed-up metronome</h2>
-      <p class="practice-metro-help">
-        Pick a passage and start slower than feels necessary. Play it, then press
-        <strong>Played it right</strong> or <strong>Made a mistake</strong>. Enough clean plays in a row
-        and the tempo goes up.
-      </p>
-
-      <div class="practice-metro-controls">
-        <label>Start BPM <input type="number" id="practice-metro-start" value="60" min="20" max="240"></label>
-        <label>Target BPM <input type="number" id="practice-metro-target" value="100" min="30" max="260"></label>
-        <label>Step <input type="number" id="practice-metro-step" value="3" min="1" max="20"></label>
-        <label>Clean plays <input type="number" id="practice-metro-need" value="2" min="1" max="10"></label>
-      </div>
-
-      <p class="practice-metro-readout"><span id="practice-metro-bpm">60</span> BPM</p>
-      <div class="practice-metro-track"><div id="practice-metro-bar" class="practice-metro-bar"></div></div>
-
-      <div class="practice-metro-buttons">
-        <button type="button" id="practice-metro-toggle" class="practice-button">▶ Start</button>
-        <button type="button" id="practice-metro-good" class="practice-button">Played it right</button>
-        <button type="button" id="practice-metro-miss" class="practice-button">Made a mistake</button>
-        <button type="button" id="practice-metro-restart" class="practice-button">Restart</button>
-      </div>
-      <p id="practice-metro-status" class="practice-metro-status" aria-live="polite"></p>
-    </section>
+  <div class="practice-tabs-bar" role="tablist" aria-label="Practice sections" data-tabs>
+    <button type="button" role="tab" class="practice-tabs-button" id="practice-tab-train" data-tab="train" aria-controls="practice-panel-train">Ear &amp; timing</button>
+    <button type="button" role="tab" class="practice-tabs-button" id="practice-tab-songs" data-tab="songs" aria-controls="practice-panel-songs">Songs</button>
   </div>
 
   {% include "chords/_keyboard.html" %}
 
-  <script id="practice-api-chord" type="application/json">"{% url 'chords:api-chord' %}"</script>
-  <script id="practice-api-progression" type="application/json">"{% url 'chords:api-progression' %}"</script>
+  <div class="practice-panel" id="practice-panel-train" role="tabpanel" aria-labelledby="practice-tab-train" data-panel="train">
+    {% include "chords/_practice_train.html" %}
+  </div>
+
+  <div class="practice-panel" id="practice-panel-songs" role="tabpanel" aria-labelledby="practice-tab-songs" data-panel="songs" hidden>
+    <p class="practice-songs-intro">Watch a piece play on the keys, load your own MIDI file, or record yourself and export it to FL Studio.</p>
+    {% include "chords/_practice_songs.html" %}
+  </div>
 {% endblock %}
 
 {% block scripts %}
   <script src="{% static 'chords/piano-core.js' %}"></script>
+  <script src="{% static 'chords/midihub.js' %}"></script>
   <script src="{% static 'chords/midi.js' %}"></script>
   <script src="{% static 'chords/typing.js' %}"></script>
+  <script src="{% static 'chords/midifile.js' %}"></script>
+  <script src="{% static 'chords/songstore.js' %}"></script>
+  <script src="{% static 'chords/tabs.js' %}"></script>
   <script src="{% static 'chords/practice.js' %}"></script>
+  <script src="{% static 'chords/songs.js' %}"></script>
 {% endblock %}

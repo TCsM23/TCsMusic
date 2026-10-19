@@ -30,30 +30,55 @@
         It treats music like a language: notes are letters, chords are words,
         and progressions are sentences.
       </p>
+      <p class="about-text">The site has five pages. Learn and Practice each hold several sections, so the menu stays short.</p>
       <ul class="about-list">
-        <li><a href="{% url 'chords:assistant' %}">Assistant</a> has a chord wheel that shows which chords go together, 25 chord types with a chart, scales, progressions and a live detector that names the chord you hold.</li>
-        <li><a href="{% url 'chords:learn' %}">Learn</a> teaches the method: letters, words, sentences.</li>
-        <li><a href="{% url 'chords:practice' %}">Practice</a> trains your ear and your timing.</li>
-        <li><a href="{% url 'chords:notation' %}">Notation</a> explains note values, dynamics, tempo and key signatures.</li>
-        <li><a href="{% url 'chords:songs' %}">Songs</a> plays pieces on the keys, loads your MIDI files and records you.</li>
-        <li><a href="{% url 'chords:studio' %}">Studio</a> is a small workstation: drum sequencer, piano roll, mixer, sound effects and WAV export.</li>
+        <li><a href="{% url 'chords:assistant' %}">Assistant</a> has a chord wheel that shows which chords go together,
+          25 chord types with a chart, scales, progressions and a live detector that names the chord you hold.
+          The wheel also shows the vii° chord of every key, outlines the seven chords of the key you picked,
+          and suggests which extensions fit each chord.</li>
+        <li><a href="{% url 'chords:learn' %}">Learn</a> has three sections. <strong>The method</strong> teaches letters, words and sentences.
+          <strong><a href="{% url 'chords:learn' %}#scales">Scales</a></strong> covers major and minor, pentatonic and blues, the church modes,
+          symmetrical scales and tonics, with the scale shown on the keyboard and on a staff, the chords each one makes, and a button that opens it in the Studio.
+          <strong><a href="{% url 'chords:learn' %}#notation">Notation</a></strong> explains note values, dynamics, tempo and key signatures.</li>
+        <li><a href="{% url 'chords:practice' %}">Practice</a> has two sections. <strong>Ear &amp; timing</strong> is an ear trainer and a slow-down-to-speed-up metronome.
+          <strong><a href="{% url 'chords:practice' %}#songs">Songs</a></strong> plays pieces on the keys, loads your MIDI files and records you.</li>
+        <li><a href="{% url 'chords:studio' %}">Studio</a> is a small workstation: multi-track recording (instruments, drums, bass, guitar,
+          sampler, your voice), a piano roll with a sustain pedal, a mixer with effects, sound effects, and WAV and stem export.</li>
       </ul>
+      <p class="about-text">
+        The key menu on Learn and Practice lists the black keys twice, once as a sharp and once as a flat (C♯ and D♭, for example),
+        and notes are written with the spelling you pick. Every page shares the same keyboard, which slides up from the bottom of the screen
+        to show what is playing when you scroll away from it. Old links to the Notation, Scales and Songs pages still work.
+      </p>
     </section>
 
     <section class="about-card about-wide" id="studio">
       <h2 class="about-heading">Studio &amp; MIDI controller</h2>
       <p class="about-text">
-        The <a href="{% url 'chords:studio' %}">Studio</a> has three views. The <strong>Sequencer</strong> is an 8-row drum grid
+        The <a href="{% url 'chords:studio' %}">Studio</a> starts with a transport bar (play, stop, record, tempo, loop length,
+        undo and redo, metronome, export) and a list of <strong>tracks</strong>. Add as many as you like: Instrument, Drum Machine,
+        Bass, Guitar, Sampler (load or record a sound and play it on the keys) and Voice / Audio (record from your microphone or import a file).
+        <strong>Import audio</strong> turns every WAV, MP3 or OGG you pick into its own track and stretches the loop to fit it.
+        The guitars are synthesized, not recorded samples.
+      </p>
+      <p class="about-text">
+        The <strong>progress bar</strong> sits right above the editing views. It shows the time and the bar and beat, and you can click or drag it to jump.
+        Below it are three views. The <strong>Sequencer</strong> is an 8-row drum grid
         (kick, snare, clap, hi-hat, open hat, tom, rim, cowbell). The <strong>Piano roll</strong> is where you write melodies,
-        for loops of 1 to 16 bars. The <strong>Mixer</strong> gives every channel a volume fader, pan, mute, solo and a level meter.
-        Press <strong>Export WAV</strong> to download your loop as an audio file. Your work is saved in this browser.
+        for loops of 1 to 16 bars, with a <strong>sustain pedal lane</strong>, a per-track Release, multi-select, copy and paste, and tools to transpose,
+        quantize, humanize and make notes legato. The <strong>Mixer</strong> gives every track a volume fader, pan, mute, solo,
+        reverb, echo, drive and tone, and a level meter.
+      </p>
+      <p class="about-text">
+        <strong>Undo</strong> and <strong>redo</strong> cover every edit. <strong>Export WAV</strong> saves the whole mix and
+        <strong>Export stems</strong> saves one file per track in a zip. Your work is saved in this browser.
       </p>
       <p class="about-text">
         Click a note on the roll to edit it: its sound, volume, a <strong>Slide</strong> that bends the pitch across the note,
-        and fade in and out. Besides the piano sounds there are a Church Organ, Choir, Strings, Bells, Harp, chip sounds and a
-        Dark Drone, plus a Pure Sine, a Noise Sweep and a Gong for building sound effects. Tick <strong>Sound-effect mode</strong>
+        and fade in and out. Besides the piano sounds there are a Church Organ, Choir, Strings, Bells, Harp, Bass, Nylon and Electric Guitar,
+        chip sounds and a Dark Drone, plus a Pure Sine, a Noise Sweep and a Gong for building sound effects. Tick <strong>Sound-effect mode</strong>
         and the drums play once, and Export WAV saves a single take with the silence trimmed and the loudness matched.
-        Pick a key and scale in the roll's toolbar to shade it on the roll. The tempo goes up to 300 BPM.
+        Pick a key and scale in the roll's toolbar to shade it on the roll (the Scales section in Learn can send one straight here). The tempo goes up to 300 BPM.
       </p>
       <h3 class="about-sub">Studio keyboard shortcuts</h3>
       <p class="about-text">Press <kbd>?</kbd> on the Studio page to show or hide this list there.</p>
@@ -70,6 +95,11 @@
             <tr><th scope="row"><kbd>[</kbd> <kbd>]</kbd></th><td>Tempo −1 / +1 (hold <kbd>Shift</kbd> for 10)</td></tr>
             <tr><th scope="row"><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></th><td>Sequencer / Piano roll / Mixer</td></tr>
             <tr><th scope="row"><kbd>E</kbd></th><td>Export WAV</td></tr>
+            <tr><th scope="row"><kbd>M</kbd></th><td>Metronome on / off</td></tr>
+            <tr><th scope="row"><kbd>Ctrl</kbd> <kbd>Z</kbd></th><td>Undo (<kbd>Shift</kbd> added: redo)</td></tr>
+            <tr><th scope="row"><kbd>V</kbd> <kbd>B</kbd></th><td>Piano roll: select tool / draw tool</td></tr>
+            <tr><th scope="row"><kbd>Ctrl</kbd> <kbd>A</kbd> <kbd>C</kbd> <kbd>X</kbd> <kbd>V</kbd></th><td>Piano roll: select all, copy, cut, paste at the playhead</td></tr>
+            <tr><th scope="row"><kbd>Q</kbd></th><td>Piano roll: quantize the selection (or every note)</td></tr>
             <tr><th scope="row"><kbd>PgUp</kbd> <kbd>PgDn</kbd></th><td>Piano roll up / down an octave</td></tr>
             <tr><th scope="row"><kbd>↑</kbd> <kbd>↓</kbd></th><td>Move the selected note a semitone (<kbd>Shift</kbd>: octave)</td></tr>
             <tr><th scope="row"><kbd>←</kbd> <kbd>→</kbd></th><td>Move the selected note by the snap (<kbd>Shift</kbd>: one step)</td></tr>
@@ -89,7 +119,9 @@
       </dl>
       <p class="about-text">
         You can link any knob, fader or button to play and stop, record, tempo, loop length, octave, master volume,
-        and each channel's volume, pan, mute and solo. Your links are remembered.
+        and each track's volume, pan, mute and solo. Your links are remembered. The site remembers that your keyboard was connected
+        and reconnects by itself on the next page, as long as your browser has already allowed MIDI. Because each page loads fresh,
+        the connection restarts when you change pages rather than staying open.
       </p>
     </section>
 

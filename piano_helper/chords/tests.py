@@ -76,3 +76,66 @@ class ChordTypesTests(TestCase):
         nine = build_chord("C", "9")
         names = [c["name"] for c in identify_chord(nine["midi"])["chords"]]
         self.assertIn("C9", names)
+
+
+class ScalesTests(TestCase):
+    def test_learn_page_holds_the_scales_section(self):
+        response = self.client.get(reverse("chords:learn"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="scales-data"')
+        self.assertContains(response, "Tonics")
+        self.assertContains(response, 'id="learn-panel-notation"')
+        self.assertContains(response, 'id="learn-panel-method"')
+
+    def test_key_menu_lists_sharps_and_flats(self):
+        html = self.client.get(reverse("chords:learn")).content.decode()
+        for name in ["C♯", "D♭", "F♯", "G♭", "A♭", "B♭"]:
+            self.assertIn(">" + name + "<", html)
+
+    def test_old_pages_redirect_into_the_merged_ones(self):
+        for name, target in [("scales", "/learn/#scales"), ("notation", "/learn/#notation"), ("songs", "/practice/#songs")]:
+            response = self.client.get(reverse("chords:" + name))
+            self.assertEqual(response.status_code, 301, name)
+            self.assertEqual(response["Location"], target, name)
+        response = self.client.get(reverse("chords:scales") + "?scale=dorian&key=3")
+        self.assertEqual(response["Location"], "/learn/?scale=dorian&key=3#scales")
+
+    def test_practice_page_holds_the_songs_section(self):
+        response = self.client.get(reverse("chords:practice"))
+        self.assertContains(response, 'id="practice-panel-songs"')
+        self.assertContains(response, 'id="songs-import-input"')
+
+    def test_flat_keys_are_spelled_with_flats(self):
+        from .theory import build_scale, build_progression
+        self.assertEqual(build_scale("Db", "major")["notes"], ["Db", "Eb", "F", "Gb", "Ab", "Bb", "C"])
+        self.assertEqual(build_scale("C#", "major")["notes"][:2], ["C#", "D#"])
+        self.assertEqual([c["name"] for c in build_progression("Eb", "1-4-5")["chords"]], ["Eb", "Ab", "Bb"])
+
+    def test_every_scale_adds_up_to_an_octave(self):
+        from . import scale_data
+        for s in scale_data.all_scales():
+            self.assertEqual(s["steps"][0], 0, s["id"])
+            self.assertEqual(sorted(set(s["steps"])), s["steps"], s["id"])
+            self.assertTrue(all(0 <= n < 12 for n in s["steps"]), s["id"])
+
+    def test_symmetrical_scales_repeat(self):
+        from . import scale_data
+        by_id = {s["id"]: s for s in scale_data.all_scales()}
+        self.assertEqual(by_id["whole-tone"]["transpositions"], 2)
+        self.assertEqual(by_id["diminished-wh"]["transpositions"], 3)
+        self.assertEqual(by_id["augmented"]["transpositions"], 4)
+        self.assertEqual(by_id["chromatic"]["transpositions"], 1)
+        self.assertEqual(by_id["major"]["transpositions"], 12)
+
+    def test_major_pattern_and_modes(self):
+        from . import scale_data
+        by_id = {s["id"]: s for s in scale_data.all_scales()}
+        self.assertEqual(by_id["major"]["pattern"], "W-W-H-W-W-W-H")
+        self.assertEqual(by_id["harmonic-minor"]["pattern"], "W-H-W-W-H-W+H-H")
+        for mode in scale_data.MODE_ORDER:
+            self.assertIn(mode, by_id)
+
+    def test_studio_gets_the_scale_list(self):
+        response = self.client.get(reverse("chords:studio"))
+        self.assertContains(response, 'id="studio-scales-data"')
+        self.assertContains(response, "Dorian")

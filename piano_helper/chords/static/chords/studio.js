@@ -13,12 +13,14 @@
   const SCHEDULE_AHEAD = 0.1;   // how far ahead (seconds) it plans sounds
   const STORE_KEY = "tcsmusic-studio";
   const MAP_KEY = "tcsmusic-studio-midi";
+  // The drum voices (kick, snare...). Each has its own mixer channel and its own row in the sequencer.
   const TRACKS = JSON.parse($("studio-tracks-data").textContent);
   const TRACK_IDS = TRACKS.map((t) => t.id);
-  const CHANNELS = TRACK_IDS.concat(["keys"]);
   const NAME = {};
   TRACKS.forEach((t) => { NAME[t.id] = t.name; });
-  NAME.keys = "Keys";
+  const SCALE_DATA = (function () {
+    try { return JSON.parse($("studio-scales-data").textContent); } catch (error) { return []; }
+  })();
 
   const playButton = $("studio-play");
   const stopButton = $("studio-stop");
@@ -31,30 +33,100 @@
   const exportButton = $("studio-export");
   const exportNote = $("studio-export-note");
 
+  // ---------- what a track can be ----------
+  // inst: a virtual instrument. bass, guitar: the same, with a bass or a plucked-string sound to start with.
+  // sampler: your own sound, played across the keys. audio: recordings and imported clips. drums: a 16-step machine.
+  const KINDS = {
+    drums:   { label: "Drum Machine", icon: "🥁", base: 48 },
+    inst:    { label: "Instrument", icon: "🎹", inst: "piano", base: 48 },
+    bass:    { label: "Bass", icon: "🎸", inst: "bass", base: 24 },
+    guitar:  { label: "Guitar", icon: "🎸", inst: "guitar", base: 40 },
+    sampler: { label: "Sampler", icon: "🎛️", base: 48 },
+    audio:   { label: "Voice / Audio", icon: "🎙️", base: 48 },
+  };
+  const NOTE_KINDS = ["inst", "bass", "guitar", "sampler"]; // tracks with a piano roll
+  const freshMix = () => ({ vol: 0.8, pan: 0, mute: false, solo: false, rev: 0, del: 0, drive: 0, tone: 1 });
+  const emptyPattern = () => {
+    const p = {};
+    TRACK_IDS.forEach((id) => { p[id] = new Array(STEPS).fill(false); });
+    return p;
+  };
+
   // ---------- data ----------
   // pattern.kick[3] === true means "play the kick on step 4"
   const S = {
     bars: 1,
-    pattern: {},
-    notes: [],      // piano roll: { midi, start (in steps), len (in steps), vel (0-1) }
-    mixer: {},      // { vol 0-1, pan -1..1, mute, solo } per channel
+    tracks: [],     // each: { id, type, name, inst, notes, pedal, rollBase, release, sample, clips, pattern, builtin }
+    active: "",     // the track you are working on
+    mixer: {},      // { vol 0-1, pan -1..1, mute, solo, rev, del, drive, tone } per channel (drum voices and tracks)
     master: 0.9,
     pads: ["kick", "snare", "clap", "hat", "open", "tom", "rim", "cow",
            "kick", "snare", "clap", "hat", "open", "tom", "rim", "cow"],
     snap: 2,
-    rollBase: 48,
     sfx: false,     // sound-effect mode: drums play once, and the export is one trimmed, level-matched take
+    metro: false,
+    tool: "draw",   // draw: click to add notes. select: drag a box round notes.
     scale: { root: 2, name: "Off", pcs: [], show: false }, // shaded on the roll when a scale is chosen
   };
+  let nextId = 1;
+  let lastDrumId = "drums";
+  let lastNoteId = "";
+
   // each instrument gets its own colour on the roll, so layers are easy to tell apart
   const HUES = { piano: 355, epiano: 20, organ: 38, synth: 280, harpsichord: 28, musicbox: 190, cathedral: 46,
-    choir: 205, strings: 255, bells: 170, harp: 140, chiplead: 100, chipbass: 75, drone: 310, sine: 225, noise: 330, gong: 60 };
+    choir: 205, strings: 255, bells: 170, harp: 140, chiplead: 100, chipbass: 75, drone: 310, sine: 225, noise: 330, gong: 60,
+    bass: 95, guitar: 30, eguitar: 8, sample: 160 };
+
+  const trackById = (id) => S.tracks.find((t) => t.id === id) || null;
+  const activeTrack = () => trackById(S.active) || S.tracks[0];
+  const isNoteKind = (t) => !!t && NOTE_KINDS.includes(t.type);
+  const drumTrack = () => { const a = activeTrack(); return a && a.type === "drums" ? a : (trackById(lastDrumId) || S.tracks.find((t) => t.type === "drums")); };
+  // the track that live keys and recorded notes go to
+  const noteTrack = () => { const a = activeTrack(); return isNoteKind(a) ? a : (trackById(lastNoteId) || S.tracks.find(isNoteKind) || null); };
+
+  // These three follow whichever track you are working on, so the sequencer and the roll
+  // keep reading S.pattern, S.notes and S.rollBase.
+  Object.defineProperty(S, "pattern", { get() { return drumTrack().pattern; }, set(v) { drumTrack().pattern = v; } });
+  Object.defineProperty(S, "notes", {
+    get() { const t = noteTrack(); return t ? t.notes : []; },
+    set(v) { const t = noteTrack(); if (t) t.notes = v; },
+  });
+  Object.defineProperty(S, "rollBase", {
+    get() { const t = noteTrack() || activeTrack(); return t ? t.rollBase : 48; },
+    set(v) { const t = noteTrack() || activeTrack(); if (t) t.rollBase = v; },
+  });
+
+  function newTrack(type, name, forcedId) {
+    const kind = KINDS[type];
+    let id = forcedId;
+    if (!id) { id = "t" + nextId; while (trackById(id)) { nextId += 1; id = "t" + nextId; } nextId += 1; }
+    const same = S.tracks.filter((t) => t.type === type).length;
+    const t = {
+      id, type, name: name || kind.label + (same ? " " + (same + 1) : ""), inst: kind.inst || "piano",
+      notes: [], pedal: [], rollBase: kind.base, release: 0, sample: null, clips: [],
+      pattern: type === "drums" ? emptyPattern() : null, builtin: false,
+    };
+    if (!S.mixer[id]) S.mixer[id] = freshMix();
+    return t;
+  }
+
   const stepButtons = {};
   TRACK_IDS.forEach((id) => {
-    S.pattern[id] = new Array(STEPS).fill(false);
     stepButtons[id] = [];
+    S.mixer[id] = freshMix();
   });
-  CHANNELS.forEach((id) => { S.mixer[id] = { vol: 0.8, pan: 0, mute: false, solo: false }; });
+  {
+    const drums = newTrack("drums", "Drum Machine", "drums");
+    drums.builtin = true;
+    S.tracks.push(drums);
+    const keys = newTrack("inst", "Keys");
+    S.tracks.push(keys);
+    S.active = keys.id;
+    lastNoteId = keys.id;
+  }
+
+  const channels = () => TRACK_IDS.concat(S.tracks.map((t) => t.id));
+  const nameOf = (id) => (NAME[id] || (trackById(id) ? (id === "drums" ? "Drums" : trackById(id).name) : id));
 
   grid.querySelectorAll(".studio-grid-step").forEach((button) => {
     stepButtons[button.dataset.track][Number(button.dataset.step)] = button;
@@ -69,6 +141,78 @@
 
   const totalSteps = () => S.bars * STEPS;
   const stepLength = () => 60 / Number(bpmInput.value) / 4; // one sixteenth note, in seconds
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+  // ---------- the user's own sounds: samples and recordings are kept in this browser ----------
+  const audio = { buffers: {}, peaks: {}, loading: {} };
+
+  const idb = (function () {
+    let opened = null;
+    function open() {
+      if (!opened) {
+        opened = new Promise((resolve, reject) => {
+          if (!window.indexedDB) { reject(new Error("no storage")); return; }
+          const request = indexedDB.open("tcsmusic-studio-audio", 1);
+          request.onupgradeneeded = () => request.result.createObjectStore("blobs");
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+      }
+      return opened;
+    }
+    function run(mode, fn) {
+      return open().then((db) => new Promise((resolve, reject) => {
+        const tx = db.transaction("blobs", mode);
+        const request = fn(tx.objectStore("blobs"));
+        tx.oncomplete = () => resolve(request ? request.result : undefined);
+        tx.onerror = () => reject(tx.error);
+      }));
+    }
+    return {
+      put: (id, blob) => run("readwrite", (store) => store.put(blob, id)),
+      get: (id) => run("readonly", (store) => store.get(id)),
+      del: (id) => run("readwrite", (store) => store.delete(id)),
+    };
+  })();
+
+  function peaksOf(buffer) {
+    const n = 1200;
+    const out = new Float32Array(n);
+    const data = buffer.getChannelData(0);
+    const size = Math.max(1, Math.floor(data.length / n));
+    for (let i = 0; i < n; i++) {
+      let peak = 0;
+      const from = i * size;
+      for (let j = from; j < Math.min(data.length, from + size); j += Math.max(1, size >> 4)) peak = Math.max(peak, Math.abs(data[j]));
+      out[i] = peak;
+    }
+    return out;
+  }
+
+  async function decodeBlob(blob) {
+    const bytes = await blob.arrayBuffer();
+    return K.getCtx().decodeAudioData(bytes.slice(0));
+  }
+
+  async function storeAudio(blob) {
+    const id = "a" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    audio.buffers[id] = await decodeBlob(blob);
+    audio.peaks[id] = peaksOf(audio.buffers[id]);
+    try { await idb.put(id, blob); } catch (error) { /* kept for this visit only */ }
+    return id;
+  }
+
+  // Bring a saved sample or clip back from the browser's storage.
+  function ensureAudio(id) {
+    if (!id || audio.buffers[id] || audio.loading[id]) return;
+    audio.loading[id] = idb.get(id).then(async (blob) => {
+      if (!blob) return;
+      audio.buffers[id] = await decodeBlob(blob);
+      audio.peaks[id] = peaksOf(audio.buffers[id]);
+      dirty = true;
+      if (typeof renderSettings === "function") renderSettings();
+    }).catch(() => { /* gone: the track just stays silent */ }).then(() => { delete audio.loading[id]; });
+  }
 
   // ---------- sounds (all built from oscillators and noise) ----------
   const noises = new WeakMap();
@@ -140,55 +284,144 @@
     },
   };
 
-  // ---------- the engine: channels -> master -> output ----------
+  // ---------- the engine: channels -> effects -> pan -> master -> output ----------
   // The same code builds the live engine and the offline one that renders a WAV.
+  const toneHz = (norm) => 250 * Math.pow(80, norm); // 250 Hz (dark) up to 20 kHz (bright)
+
+  function impulse(ctx) {
+    const seconds = 2.2;
+    const length = Math.floor(ctx.sampleRate * seconds);
+    const buffer = ctx.createBuffer(2, length, ctx.sampleRate);
+    for (let c = 0; c < 2; c++) {
+      const data = buffer.getChannelData(c);
+      for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 3.2);
+    }
+    return buffer;
+  }
+
+  const softClip = (function () {
+    const curve = new Float32Array(1024);
+    for (let i = 0; i < curve.length; i++) curve[i] = Math.tanh((i / (curve.length - 1)) * 2 - 1);
+    return curve;
+  })();
+
+  // One mixer channel: tone -> (dry + drive) -> pan -> output, with reverb and echo sends taken after the pan.
+  function makeChannel(e, id) {
+    const ctx = e.ctx;
+    const input = ctx.createGain();
+    const toneFilter = ctx.createBiquadFilter();
+    toneFilter.type = "lowpass";
+    toneFilter.frequency.value = 20000;
+    const dry = ctx.createGain();
+    const pre = ctx.createGain();
+    pre.gain.value = 10;
+    const shaper = ctx.createWaveShaper();
+    shaper.curve = softClip;
+    const post = ctx.createGain();
+    post.gain.value = 0.17;
+    const wet = ctx.createGain();
+    wet.gain.value = 0;
+    const pan = ctx.createStereoPanner();
+    const revSend = ctx.createGain();
+    revSend.gain.value = 0;
+    const delSend = ctx.createGain();
+    delSend.gain.value = 0;
+    input.connect(toneFilter);
+    toneFilter.connect(dry);
+    toneFilter.connect(pre);
+    pre.connect(shaper);
+    shaper.connect(post);
+    post.connect(wet);
+    dry.connect(pan);
+    wet.connect(pan);
+    pan.connect(id !== "drums" && TRACK_IDS.includes(id) && e.ch.drums ? e.ch.drums.input : e.master);
+    pan.connect(revSend);
+    revSend.connect(e.reverb);
+    pan.connect(delSend);
+    delSend.connect(e.echo);
+    let analyser = null;
+    if (e.live) {
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      pan.connect(analyser);
+    }
+    return { input, toneFilter, dry, wet, pan, revSend, delSend, analyser };
+  }
+
+  function ensureChannels(e) {
+    if (!e.ch.drums) e.ch.drums = makeChannel(e, "drums");
+    channels().forEach((id) => { if (!e.ch[id]) e.ch[id] = makeChannel(e, id); });
+  }
+
   function buildEngine(ctx, dest, live) {
     const master = ctx.createGain();
     master.connect(dest);
-    const ch = {};
-    CHANNELS.forEach((id) => {
-      const input = ctx.createGain();
-      const pan = ctx.createStereoPanner();
-      input.connect(pan);
-      pan.connect(master);
-      let analyser = null;
-      if (live) {
-        analyser = ctx.createAnalyser();
-        analyser.fftSize = 512;
-        pan.connect(analyser);
-      }
-      ch[id] = { input, pan, analyser };
-    });
+    const reverb = ctx.createConvolver();
+    reverb.buffer = impulse(ctx);
+    const revReturn = ctx.createGain();
+    revReturn.gain.value = 0.8;
+    reverb.connect(revReturn);
+    revReturn.connect(master);
+    const echo = ctx.createDelay(2);
+    const echoFeedback = ctx.createGain();
+    echoFeedback.gain.value = 0.38;
+    const echoTone = ctx.createBiquadFilter();
+    echoTone.type = "lowpass";
+    echoTone.frequency.value = 3200;
+    echo.connect(echoTone);
+    echoTone.connect(echoFeedback);
+    echoFeedback.connect(echo);
+    echoTone.connect(master);
     let masterAnalyser = null;
     if (live) {
       masterAnalyser = ctx.createAnalyser();
       masterAnalyser.fftSize = 512;
       master.connect(masterAnalyser);
     }
-    const engine = { ctx, master, ch, masterAnalyser, live };
-    applyMixer(engine);
-    return engine;
+    const e = { ctx, master, ch: {}, reverb, echo, masterAnalyser, live, sources: [] };
+    ensureChannels(e);
+    applyMixer(e);
+    return e;
   }
 
-  function anySolo() { return CHANNELS.some((id) => S.mixer[id].solo); }
+  // Who can be heard. A solo silences everything else, but a drum voice and the drum bus share:
+  // soloing the Kick lets the kick through the Drums bus, and soloing the bus lets every voice through.
+  function audibleFlags() {
+    const ids = channels();
+    const soloAny = ids.some((id) => S.mixer[id].solo);
+    const voiceSolo = TRACK_IDS.some((id) => S.mixer[id].solo);
+    const flags = {};
+    ids.forEach((id) => {
+      const m = S.mixer[id];
+      let ok = !m.mute;
+      if (soloAny) {
+        if (TRACK_IDS.includes(id)) ok = ok && (m.solo || S.mixer.drums.solo);
+        else if (id === "drums") ok = ok && (m.solo || voiceSolo);
+        else ok = ok && m.solo;
+      }
+      flags[id] = ok;
+    });
+    return flags;
+  }
 
   function applyMixer(e) {
-    const solo = anySolo();
+    ensureChannels(e);
+    const flags = audibleFlags();
     const now = e.ctx.currentTime;
-    CHANNELS.forEach((id) => {
+    const set = (param, value) => { if (e.live) param.setTargetAtTime(value, now, 0.01); else param.value = value; };
+    channels().forEach((id) => {
       const m = S.mixer[id];
-      const audible = !m.mute && (!solo || m.solo);
-      const target = audible ? m.vol : 0;
-      if (e.live) {
-        e.ch[id].input.gain.setTargetAtTime(target, now, 0.01);
-        e.ch[id].pan.pan.setTargetAtTime(m.pan, now, 0.01);
-      } else {
-        e.ch[id].input.gain.value = target;
-        e.ch[id].pan.pan.value = m.pan;
-      }
+      const c = e.ch[id];
+      set(c.input.gain, flags[id] ? m.vol : 0);
+      set(c.pan.pan, m.pan);
+      set(c.toneFilter.frequency, toneHz(m.tone === undefined ? 1 : m.tone));
+      set(c.wet.gain, m.drive || 0);
+      set(c.dry.gain, 1 - 0.6 * (m.drive || 0));
+      set(c.revSend.gain, (m.rev || 0) * 0.9);
+      set(c.delSend.gain, (m.del || 0) * 0.9);
     });
-    if (e.live) e.master.gain.setTargetAtTime(S.master, now, 0.01);
-    else e.master.gain.value = S.master;
+    set(e.master.gain, S.master);
+    e.echo.delayTime.value = Math.min(1.9, stepLength() * 3); // a dotted eighth, so the echoes sit in time
   }
 
   let live = null;
@@ -197,31 +430,143 @@
       const ctx = K.getCtx();
       live = buildEngine(ctx, K.getMix(), true);
     }
+    ensureChannels(live);
     return live;
   }
 
-  function hitDrum(e, id, time, vel) {
+  // Long sounds (samples and recordings) have to be silenced by hand when you stop or jump.
+  function keep(e, src, gain) {
+    if (!e.live) return;
+    e.sources.push({ src, gain });
+    src.onended = () => { e.sources = e.sources.filter((s) => s.src !== src); };
+  }
+
+  function killSources() {
+    if (!live) return;
+    const now = live.ctx.currentTime;
+    live.sources.forEach(({ src, gain }) => {
+      try {
+        gain.gain.cancelScheduledValues(now);
+        gain.gain.setTargetAtTime(0, now, 0.01);
+        src.stop(now + 0.08);
+      } catch (error) { /* already finished */ }
+    });
+    live.sources = [];
+  }
+
+  function hitDrum(e, id, time, vel, via) {
     const g = e.ctx.createGain();
     g.gain.value = vel;
-    g.connect(e.ch[id].input);
+    g.connect(e.ch[via || id].input);
     VOICES[id](e.ctx, g, time);
   }
 
-  function noteOpts(n) {
-    return { glide: n.glide || 0, fadeIn: (n.fadeIn || 0) / 100, fadeOut: (n.fadeOut || 0) / 100 };
+  function noteOpts(n, trk) {
+    return { glide: n.glide || 0, fadeIn: (n.fadeIn || 0) / 100, fadeOut: (n.fadeOut || 0) / 100, release: trk ? trk.release || 0 : 0 };
   }
 
-  function playKey(e, midi, time, dur, vel, inst, opts) {
-    K.noteInto(e.ctx, e.ch.keys.input, midi, time, dur, 0.04 + 0.14 * vel, inst || K.getInstrument(), opts);
+  // A note that ends while the sustain pedal is down keeps ringing until the pedal comes up.
+  function pedalHold(trk, n, stepLen) {
+    const end = n.start + n.len;
+    for (let i = 0; i < trk.pedal.length; i++) {
+      const p = trk.pedal[i];
+      if (end > p.start && end <= p.start + p.len) return (p.start + p.len - end) * stepLen;
+    }
+    return 0;
+  }
+
+  function playSample(e, trk, midi, time, seconds, vel, o) {
+    const s = trk.sample;
+    const buffer = s && audio.buffers[s.id];
+    if (!buffer) return;
+    const src = e.ctx.createBufferSource();
+    src.buffer = buffer;
+    const rate = Math.pow(2, (midi - (s.root === undefined ? 60 : s.root)) / 12);
+    const glide = o && o.glide ? o.glide : 0;
+    src.playbackRate.setValueAtTime(rate, time);
+    const whole = buffer.duration / rate;
+    const length = s.whole === false ? Math.max(0.05, seconds) : whole;
+    if (glide) src.playbackRate.exponentialRampToValueAtTime(rate * Math.pow(2, glide / 12), time + length);
+    const g = e.ctx.createGain();
+    const peak = 0.2 + 0.8 * vel;
+    const fi = o ? o.fadeIn || 0 : 0;
+    const fo = o ? Math.min(1 - fi, o.fadeOut || 0) : 0;
+    g.gain.setValueAtTime(fi > 0 ? 0.0001 : peak, time);
+    if (fi > 0) g.gain.linearRampToValueAtTime(peak, time + fi * length);
+    if (fo > 0) {
+      g.gain.setValueAtTime(peak, time + length - fo * length);
+      g.gain.linearRampToValueAtTime(0.0001, time + length);
+    } else if (s.whole === false) {
+      g.gain.setValueAtTime(peak, time + Math.max(0, length - 0.04));
+      g.gain.linearRampToValueAtTime(0.0001, time + length);
+    }
+    src.connect(g);
+    g.connect(e.ch[trk.id].input);
+    src.start(time);
+    src.stop(time + length + 0.05);
+    keep(e, src, g);
+  }
+
+  function playClip(e, trk, clip, time, offset) {
+    const buffer = audio.buffers[clip.bufferId];
+    if (!buffer || offset >= buffer.duration) return;
+    const src = e.ctx.createBufferSource();
+    src.buffer = buffer;
+    const g = e.ctx.createGain();
+    g.gain.value = clip.gain === undefined ? 1 : clip.gain;
+    src.connect(g);
+    g.connect(e.ch[trk.id].input);
+    src.start(time, offset || 0);
+    keep(e, src, g);
+  }
+
+  function playKey(e, midi, time, dur, vel, inst, opts, trk) {
+    trk = trk || noteTrack();
+    if (!trk || !e.ch[trk.id]) return;
+    if (trk.type === "sampler") { playSample(e, trk, midi, time, dur, vel, opts); return; }
+    K.noteInto(e.ctx, e.ch[trk.id].input, midi, time, dur, 0.04 + 0.14 * vel, inst || trk.inst || K.getInstrument(), opts);
+  }
+
+  function click(e, time, accent) {
+    const osc = e.ctx.createOscillator();
+    const g = e.ctx.createGain();
+    osc.frequency.value = accent ? 1600 : 1100;
+    g.gain.setValueAtTime(accent ? 0.22 : 0.12, time);
+    g.gain.exponentialRampToValueAtTime(0.001, time + 0.05);
+    osc.connect(g);
+    g.connect(e.master);
+    osc.start(time);
+    osc.stop(time + 0.06);
   }
 
   function scheduleStepInto(e, step, time, stepLen) {
     const ds = step % STEPS;
-    TRACK_IDS.forEach((id) => {
-      if (S.pattern[id][ds] && !(S.sfx && step >= STEPS)) hitDrum(e, id, time, 1);
+    const firstBar = !(S.sfx && step >= STEPS);
+    S.tracks.forEach((trk) => {
+      if (trk.type === "drums") {
+        if (!firstBar) return;
+        TRACK_IDS.forEach((id) => { if (trk.pattern[id][ds]) hitDrum(e, id, time, 1, trk.builtin ? null : trk.id); });
+      } else if (trk.type === "audio") {
+        trk.clips.forEach((c) => { if (Math.floor(c.start) === step) playClip(e, trk, c, time + (c.start - step) * stepLen, 0); });
+      } else {
+        trk.notes.forEach((n) => {
+          if (n.start !== step) return;
+          playKey(e, n.midi, time + (n.off || 0) * stepLen, Math.max(0.08, n.len * stepLen + pedalHold(trk, n, stepLen)), n.vel, n.inst, noteOpts(n, trk), trk);
+        });
+      }
     });
-    S.notes.forEach((n) => {
-      if (n.start === step) playKey(e, n.midi, time, Math.max(0.08, n.len * stepLen), n.vel, n.inst, noteOpts(n));
+    if (e.live && S.metro && step % 4 === 0) click(e, time, step % STEPS === 0);
+  }
+
+  // jumping into the middle of a clip: start it part-way through
+  function resumeClips(e, from, time) {
+    const sl = stepLength();
+    S.tracks.forEach((trk) => {
+      if (trk.type !== "audio") return;
+      trk.clips.forEach((c) => {
+        const b = audio.buffers[c.bufferId];
+        if (b && c.start < from && from < c.start + b.duration / sl) playClip(e, trk, c, time, (from - c.start) * sl);
+      });
     });
   }
 
@@ -267,14 +612,17 @@
 
   function start(from) {
     const e = engine();
+    killSources();
+    clearInterval(timer);
     from = from > 0 ? from % totalSteps() : 0;
     playing = true;
     paused = false;
-    nextStep = from;
-    curStep = from;
+    nextStep = Math.floor(from);
+    curStep = nextStep;
     nextTime = e.ctx.currentTime + 0.06;
     curTime = nextTime;
     queue = [];
+    resumeClips(e, from, nextTime);
     scheduler();
     timer = setInterval(scheduler, LOOKAHEAD_MS);
     playButton.textContent = "❚❚ Pause";
@@ -285,15 +633,17 @@
   // Pause keeps the place; Play then reads "Resume" and carries on from the same step.
   function pause() {
     if (!playing) return;
+    resumeStep = position();
     playing = false;
     paused = true;
-    resumeStep = curStep;
     clearInterval(timer);
     queue = [];
-    showStep(curStep);
+    killSources();
+    showStep(Math.floor(resumeStep));
     playButton.textContent = "▶ Resume";
     playButton.setAttribute("aria-pressed", "false");
     setRecording(false);
+    finishAudioRecording();
     dirty = true;
   }
 
@@ -305,11 +655,24 @@
     resumeStep = 0;
     clearInterval(timer);
     queue = [];
+    killSources();
     showStep(-1);
     curStep = 0;
     playButton.textContent = "▶ Play";
     playButton.setAttribute("aria-pressed", "false");
     setRecording(false);
+    finishAudioRecording();
+    dirty = true;
+  }
+
+  // Jump to a place on the ruler. While playing it carries on from there; otherwise Play resumes from there.
+  function seek(step) {
+    step = clamp(Math.round(step), 0, totalSteps() - 1);
+    if (playing) { start(step); return; }
+    resumeStep = step;
+    paused = step > 0;
+    showStep(step > 0 ? step : -1);
+    playButton.textContent = step > 0 ? "▶ Resume" : "▶ Play";
     dirty = true;
   }
 
@@ -321,79 +684,189 @@
 
   // ---------- drawing the grid from the data ----------
   function paint() {
+    const pattern = drumTrack().pattern;
     TRACK_IDS.forEach((id) => {
       for (let i = 0; i < STEPS; i++) {
-        stepButtons[id][i].setAttribute("aria-pressed", String(S.pattern[id][i]));
+        stepButtons[id][i].setAttribute("aria-pressed", String(pattern[id][i]));
       }
       grid.querySelector('.studio-grid-mute[data-track="' + id + '"]')
         .setAttribute("aria-pressed", String(S.mixer[id].mute));
     });
+    const label = $("studio-seq-owner");
+    if (label) label.textContent = drumTrack().name;
   }
 
-  // ---------- remembering ----------
-  function save() {
+  // ---------- remembering, and undo ----------
+  function serialize() {
+    return {
+      v: 2, bars: S.bars, snap: S.snap, bpm: Number(bpmInput.value), master: S.master, pads: S.pads, scale: S.scale,
+      sfx: S.sfx, metro: S.metro, nextId, mixer: S.mixer,
+      tracks: S.tracks.map((t) => ({
+        id: t.id, type: t.type, name: t.name, inst: t.inst, notes: t.notes, pedal: t.pedal, rollBase: t.rollBase,
+        release: t.release, sample: t.sample, clips: t.clips, pattern: t.pattern, builtin: t.builtin,
+      })),
+    };
+  }
+
+  const hist = { stack: [], idx: -1, at: 0, busy: false };
+
+  function remember() {
+    const text = JSON.stringify(serialize());
+    try { localStorage.setItem(STORE_KEY, text); } catch (error) { /* private window: just don't remember */ }
+    if (hist.busy || text === hist.stack[hist.idx]) return;
+    const now = Date.now();
+    if (hist.idx > 0 && now - hist.at < 350 && hist.idx === hist.stack.length - 1) hist.stack[hist.idx] = text; // a slider drag is one step
+    else {
+      hist.stack.length = hist.idx + 1;
+      hist.stack.push(text);
+      if (hist.stack.length > 120) hist.stack.shift();
+      hist.idx = hist.stack.length - 1;
+    }
+    hist.at = now;
+    syncHistoryButtons();
+  }
+  const save = remember;
+
+  function syncHistoryButtons() {
+    const undo = $("studio-undo"), redo = $("studio-redo");
+    if (undo) undo.disabled = hist.idx <= 0;
+    if (redo) redo.disabled = hist.idx >= hist.stack.length - 1;
+  }
+
+  function historyStep(dir) {
+    const to = hist.idx + dir;
+    if (to < 0 || to >= hist.stack.length) return;
+    hist.idx = to;
+    hist.busy = true;
     try {
-      localStorage.setItem(STORE_KEY, JSON.stringify({
-        pattern: S.pattern, notes: S.notes, mixer: S.mixer, master: S.master, pads: S.pads,
-        bars: S.bars, snap: S.snap, rollBase: S.rollBase, bpm: Number(bpmInput.value), scale: S.scale, sfx: S.sfx,
+      applyState(JSON.parse(hist.stack[to]));
+      try { localStorage.setItem(STORE_KEY, hist.stack[to]); } catch (error) { /* fine */ }
+    } finally { hist.busy = false; }
+    hist.at = 0;
+    syncHistoryButtons();
+  }
+  const undo = () => historyStep(-1);
+  const redo = () => historyStep(1);
+
+  function cleanNotes(list, limit) {
+    return (Array.isArray(list) ? list : [])
+      .filter((n) => n && n.midi >= 21 && n.midi <= 108 && n.start >= 0 && n.len > 0 && n.start < limit)
+      .map((n) => ({
+        midi: n.midi | 0, start: n.start | 0, len: Math.max(1, Math.min(n.len | 0, limit - (n.start | 0))),
+        vel: clamp(Number(n.vel) || 0.8, 0.05, 1), inst: HUES[n.inst] !== undefined ? n.inst : undefined,
+        glide: clamp(Math.round(Number(n.glide)) || 0, -48, 48),
+        fadeIn: clamp(Math.round(Number(n.fadeIn)) || 0, 0, 100),
+        fadeOut: clamp(Math.round(Number(n.fadeOut)) || 0, 0, 100),
+        off: clamp(Number(n.off) || 0, -0.45, 0.45),
       }));
-    } catch (error) { /* private window: just don't remember */ }
+  }
+
+  function cleanMix(m) {
+    const base = freshMix();
+    if (!m || typeof m !== "object") return base;
+    return {
+      vol: Number.isFinite(Number(m.vol)) ? clamp(Number(m.vol), 0, 1) : 0.8, pan: clamp(Number(m.pan), -1, 1) || 0, mute: m.mute === true, solo: m.solo === true,
+      rev: clamp(Number(m.rev), 0, 1) || 0, del: clamp(Number(m.del), 0, 1) || 0, drive: clamp(Number(m.drive), 0, 1) || 0,
+      tone: m.tone === undefined ? 1 : clamp(Number(m.tone), 0, 1),
+    };
+  }
+
+  // Put a saved project (or an undo step) back. Understands the first Studio's format too.
+  function applyState(saved, wantedActive) {
+    if (!saved || typeof saved !== "object") return;
+    const keepActive = wantedActive !== undefined ? wantedActive : S.active;
+    S.tracks = [];
+    S.mixer = {};
+    TRACK_IDS.forEach((id) => { S.mixer[id] = freshMix(); });
+    S.bars = [1, 2, 4, 8, 16].includes(saved.bars) ? saved.bars : 1;
+    const limit = totalSteps();
+    const savedMix = saved.mixer || {};
+    TRACK_IDS.forEach((id) => { S.mixer[id] = cleanMix(savedMix[id]); if (saved.muted && saved.muted[id]) S.mixer[id].mute = true; });
+
+    if (Array.isArray(saved.tracks) && saved.tracks.length) {
+      saved.tracks.forEach((st) => {
+        if (!st || !KINDS[st.type]) return;
+        const id = typeof st.id === "string" && /^[a-z0-9]{1,12}$/.test(st.id) ? st.id : null;
+        if (id && trackById(id)) return;
+        const t = newTrack(st.type, String(st.name || "").slice(0, 30) || undefined, id || undefined);
+        if (HUES[st.inst] !== undefined) t.inst = st.inst;
+        t.notes = cleanNotes(st.notes, limit);
+        t.pedal = (Array.isArray(st.pedal) ? st.pedal : []).filter((p) => p && p.start >= 0 && p.len >= 1 && p.start < limit)
+          .map((p) => ({ start: p.start | 0, len: Math.min(p.len | 0, limit - (p.start | 0)) }));
+        if (st.rollBase >= 12 && st.rollBase <= 84) t.rollBase = st.rollBase | 0;
+        t.release = clamp(Number(st.release) || 0, 0, 4);
+        if (st.sample && typeof st.sample.id === "string") {
+          t.sample = { id: st.sample.id.slice(0, 40), name: String(st.sample.name || "sample").slice(0, 60),
+            root: clamp(st.sample.root | 0, 0, 127) || 60, whole: st.sample.whole !== false };
+        }
+        t.clips = (Array.isArray(st.clips) ? st.clips : []).filter((c) => c && typeof c.bufferId === "string").slice(0, 40)
+          .map((c) => ({ id: String(c.id || c.bufferId).slice(0, 40), bufferId: c.bufferId.slice(0, 40), name: String(c.name || "clip").slice(0, 60),
+            start: Math.max(0, Number(c.start) || 0), gain: clamp(c.gain === undefined ? 1 : Number(c.gain), 0, 2) }));
+        if (t.type === "drums" && st.pattern) {
+          TRACK_IDS.forEach((v) => {
+            if (Array.isArray(st.pattern[v])) for (let i = 0; i < STEPS; i++) t.pattern[v][i] = st.pattern[v][i] === true;
+          });
+        }
+        t.builtin = st.builtin === true && t.id === "drums";
+        S.mixer[t.id] = cleanMix(savedMix[t.id]);
+        S.tracks.push(t);
+      });
+    } else {
+      // the first Studio kept one drum pattern and one list of notes
+      const drums = newTrack("drums", "Drum Machine", "drums");
+      drums.builtin = true;
+      TRACK_IDS.forEach((v) => {
+        if (saved.pattern && Array.isArray(saved.pattern[v])) for (let i = 0; i < STEPS; i++) drums.pattern[v][i] = saved.pattern[v][i] === true;
+      });
+      const keys = newTrack("inst", "Keys");
+      keys.notes = cleanNotes(saved.notes, limit);
+      if (saved.rollBase >= 24 && saved.rollBase <= 84) keys.rollBase = saved.rollBase | 0;
+      S.mixer.drums = freshMix();
+      S.mixer[keys.id] = cleanMix(savedMix.keys);
+      S.tracks.push(drums, keys);
+    }
+    if (!S.tracks.some((t) => t.builtin)) {
+      const drums = newTrack("drums", "Drum Machine", "drums");
+      drums.builtin = true;
+      S.mixer.drums = S.mixer.drums || freshMix();
+      S.tracks.unshift(drums);
+    }
+    if (!S.tracks.some(isNoteKind)) S.tracks.push(newTrack("inst", "Keys"));
+    S.active = trackById(keepActive) ? keepActive : (S.tracks.find(isNoteKind) || S.tracks[0]).id;
+    lastDrumId = (S.tracks.find((t) => t.type === "drums" && t.id === S.active) || S.tracks.find((t) => t.builtin)).id;
+    lastNoteId = (S.tracks.find((t) => t.id === S.active && isNoteKind(t)) || S.tracks.find(isNoteKind)).id;
+    nextId = Math.max(nextId, Number(saved.nextId) || 1);
+
+    S.master = typeof saved.master === "number" ? clamp(saved.master, 0, 1) : 0.9;
+    if (Array.isArray(saved.pads) && saved.pads.length === 16) S.pads = saved.pads.map((id, i) => (TRACK_IDS.includes(id) ? id : S.pads[i]));
+    if ([1, 2, 4].includes(saved.snap)) S.snap = saved.snap;
+    const sc = saved.scale;
+    if (sc && Array.isArray(sc.pcs) && sc.pcs.length >= 5 && sc.pcs.every((x) => x >= 0 && x < 12) && sc.show !== false) {
+      S.scale = { root: sc.root | 0, name: String(sc.name || "Scale").slice(0, 30), pcs: sc.pcs.map((x) => x | 0), show: true };
+    } else S.scale = { root: sc && sc.root >= 0 && sc.root < 12 ? sc.root | 0 : 2, name: "Off", pcs: [], show: false };
+    const bpm = Number(saved.bpm);
+    if (bpm >= 60 && bpm <= 300) bpmInput.value = bpm;
+    S.sfx = saved.sfx === true;
+    S.metro = saved.metro === true;
+    S.tracks.forEach((t) => { if (t.sample) ensureAudio(t.sample.id); t.clips.forEach((c) => ensureAudio(c.bufferId)); });
+    if (typeof rebuildUi === "function") rebuildUi();
   }
 
   function load() {
     try {
       const saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null");
-      if (!saved) return;
-      TRACK_IDS.forEach((id) => {
-        if (Array.isArray(saved.pattern && saved.pattern[id])) {
-          for (let i = 0; i < STEPS; i++) S.pattern[id][i] = saved.pattern[id][i] === true;
-        }
-        if (saved.muted && saved.muted[id]) S.mixer[id].mute = true; // the first Studio saved mutes here
-      });
-      if (saved.mixer) {
-        CHANNELS.forEach((id) => {
-          const m = saved.mixer[id];
-          if (!m) return;
-          S.mixer[id] = {
-            vol: Math.max(0, Math.min(1, Number(m.vol))) || 0,
-            pan: Math.max(-1, Math.min(1, Number(m.pan))) || 0,
-            mute: m.mute === true,
-            solo: m.solo === true,
-          };
-        });
-      }
-      if (Array.isArray(saved.notes)) {
-        S.notes = saved.notes
-          .filter((n) => n && n.midi >= 21 && n.midi <= 108 && n.start >= 0 && n.len > 0)
-          .map((n) => ({ midi: n.midi | 0, start: n.start | 0, len: Math.max(1, n.len | 0), vel: Math.max(0.05, Math.min(1, Number(n.vel) || 0.8)), inst: HUES[n.inst] !== undefined ? n.inst : undefined,
-          glide: Math.max(-48, Math.min(48, Math.round(Number(n.glide)) || 0)),
-          fadeIn: Math.max(0, Math.min(100, Math.round(Number(n.fadeIn)) || 0)),
-          fadeOut: Math.max(0, Math.min(100, Math.round(Number(n.fadeOut)) || 0)) }));
-      }
-      if (typeof saved.master === "number") S.master = Math.max(0, Math.min(1, saved.master));
-      if (Array.isArray(saved.pads) && saved.pads.length === 16) {
-        S.pads = saved.pads.map((id, i) => (TRACK_IDS.includes(id) ? id : S.pads[i]));
-      }
-      if ([1, 2, 4, 8, 16].includes(saved.bars)) S.bars = saved.bars;
-      if ([1, 2, 4].includes(saved.snap)) S.snap = saved.snap;
-      const sc = saved.scale;
-      if (sc && Array.isArray(sc.pcs) && sc.pcs.length >= 5 && sc.pcs.every((x) => x >= 0 && x < 12) && sc.show !== false) {
-        S.scale = { root: sc.root | 0, name: String(sc.name || "Scale").slice(0, 30), pcs: sc.pcs.map((x) => x | 0), show: sc.show !== false };
-      }
-      if (saved.rollBase >= 24 && saved.rollBase <= 84) S.rollBase = saved.rollBase;
-      const bpm = Number(saved.bpm);
-      if (bpm >= 60 && bpm <= 300) bpmInput.value = bpm;
-      S.sfx = saved.sfx === true;
-      const limit = totalSteps();
-      S.notes = S.notes.filter((n) => n.start < limit).map((n) => ({ ...n, len: Math.min(n.len, limit - n.start) }));
+      let active = "";
+      try { active = localStorage.getItem(STORE_KEY + "-active") || ""; } catch (error) { /* fine */ }
+      if (saved) applyState(saved, active);
     } catch (error) { /* bad data: start empty */ }
   }
 
   // ---------- setters (one place changes things, so the screen never disagrees with the sound) ----------
   function setBpm(value) {
-    const bpm = Math.round(Math.max(60, Math.min(300, value)));
+    const bpm = Math.round(clamp(value, 60, 300));
     bpmInput.value = bpm;
     bpmValue.textContent = bpm;
+    if (live) applyMixer(live);
     save();
   }
 
@@ -401,10 +874,15 @@
     S.bars = bars;
     barsSelect.value = String(bars);
     const limit = totalSteps();
-    S.notes = S.notes.filter((n) => n.start < limit).map((n) => ({ ...n, len: Math.min(n.len, limit - n.start) }));
-    if (sel) select(null);
+    S.tracks.forEach((t) => {
+      t.notes = t.notes.filter((n) => n.start < limit).map((n) => ({ ...n, len: Math.min(n.len, limit - n.start) }));
+      t.pedal = t.pedal.filter((p) => p.start < limit).map((p) => ({ ...p, len: Math.min(p.len, limit - p.start) }));
+    });
+    if (sel || selSet.size) select(null);
     if (playing) nextStep = nextStep % limit;
+    if (resumeStep >= limit) resumeStep = 0;
     sizeRoll();
+    drawProgress();
     dirty = true;
     save();
   }
@@ -412,30 +890,44 @@
   const mixerEls = {};
   function syncMixerUi(id) {
     const els = mixerEls[id];
-    if (!els) return;
     const m = id === "master" ? { vol: S.master, pan: 0, mute: false, solo: false } : S.mixer[id];
-    els.fader.value = Math.round(m.vol * 100);
-    if (els.pan) els.pan.value = Math.round(m.pan * 100);
-    if (els.mute) els.mute.setAttribute("aria-pressed", String(m.mute));
-    if (els.solo) els.solo.setAttribute("aria-pressed", String(m.solo));
+    if (els) {
+      els.fader.value = Math.round(m.vol * 100);
+      if (els.pan) els.pan.value = Math.round(m.pan * 100);
+      if (els.mute) els.mute.setAttribute("aria-pressed", String(m.mute));
+      if (els.solo) els.solo.setAttribute("aria-pressed", String(m.solo));
+    }
+    const row = trackEls[id];
+    if (row && id !== "master") {
+      row.vol.value = Math.round(m.vol * 100);
+      row.pan.value = Math.round(m.pan * 100);
+      row.mute.setAttribute("aria-pressed", String(m.mute));
+      row.solo.setAttribute("aria-pressed", String(m.solo));
+    }
   }
 
   function mixChanged() {
     if (live) applyMixer(live);
-    CHANNELS.forEach(syncMixerUi);
+    channels().forEach(syncMixerUi);
     syncMixerUi("master");
     paint();
     save();
   }
 
   function setVol(id, value) {
-    if (id === "master") S.master = Math.max(0, Math.min(1, value));
-    else S.mixer[id].vol = Math.max(0, Math.min(1, value));
+    if (id === "master") S.master = clamp(value, 0, 1);
+    else if (S.mixer[id]) S.mixer[id].vol = clamp(value, 0, 1);
     mixChanged();
   }
-  function setPan(id, value) { S.mixer[id].pan = Math.max(-1, Math.min(1, value)); mixChanged(); }
-  function toggleMute(id) { S.mixer[id].mute = !S.mixer[id].mute; mixChanged(); }
-  function toggleSolo(id) { S.mixer[id].solo = !S.mixer[id].solo; mixChanged(); }
+  function setPan(id, value) { if (S.mixer[id]) { S.mixer[id].pan = clamp(value, -1, 1); mixChanged(); } }
+  function toggleMute(id) { if (S.mixer[id]) { S.mixer[id].mute = !S.mixer[id].mute; mixChanged(); } }
+  function toggleSolo(id) { if (S.mixer[id]) { S.mixer[id].solo = !S.mixer[id].solo; mixChanged(); } }
+  function setFx(id, key, value) {
+    if (!S.mixer[id]) return;
+    S.mixer[id][key] = clamp(value, 0, 1);
+    if (live) applyMixer(live);
+    save();
+  }
 
   // ---------- pads ----------
   const padEls = [];
@@ -477,11 +969,12 @@
   function hitPad(i, vel) {
     const voice = S.pads[i];
     const e = engine();
-    hitDrum(e, voice, e.ctx.currentTime, 0.4 + 0.6 * vel);
+    const owner = drumTrack();
+    hitDrum(e, voice, e.ctx.currentTime, 0.4 + 0.6 * vel, owner.builtin ? null : owner.id);
     flash(padEls[i].pad);
     if (recording && playing) {
-      const step = Math.round(position()) % totalSteps();
-      S.pattern[voice][step % STEPS] = true;
+      const at = Math.round(position()) % totalSteps();
+      owner.pattern[voice][at % STEPS] = true;
       paint();
       save();
     }
@@ -494,22 +987,30 @@
   const LABEL_W = 58;
   const ROW_H = 16;
   const ROWS = 36;
+  const HEAD = 22;     // the ruler along the top
+  const FOOT = 28;     // the sustain pedal lane along the bottom
   const BLACK = [1, 3, 6, 8, 10];
   let stepW = 24;
   let dirty = true;
   let lastLen = 2;
   let drag = null;
-  let sel = null;   // the note the editor is showing
+  let sel = null;            // the note the editor is showing
+  let selSet = new Set();    // every selected note
+  let clipboard = null;      // copied notes
+  let pasteAt = 0;
 
   function cssVar(name, fallback) {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
   }
 
+  const rowsHeight = () => ROWS * ROW_H;
+  const rollHeight = () => HEAD + rowsHeight() + FOOT;
+
   function sizeRoll() {
     const avail = Math.max(300, rollScroll.clientWidth - LABEL_W);
     stepW = Math.max(22, Math.floor(avail / totalSteps()));
     const w = LABEL_W + stepW * totalSteps();
-    const h = ROWS * ROW_H;
+    const h = rollHeight();
     const dpr = window.devicePixelRatio || 1;
     roll.style.width = w + "px";
     roll.style.height = h + "px";
@@ -522,12 +1023,58 @@
   const rowOf = (midi) => ROWS - 1 - (midi - S.rollBase);
   const midiOf = (row) => S.rollBase + ROWS - 1 - row;
 
+  function noteRect(n) {
+    const r = rowOf(n.midi);
+    return { x: LABEL_W + (n.start + (n.off || 0)) * stepW, y: r * ROW_H, w: Math.max(4, n.len * stepW - 1), r };
+  }
+
+  function drawNote(n, hue, alpha, selected) {
+    const { x, w, r } = noteRect(n);
+    if (r < 0 || r >= ROWS) return;
+    const top = r * ROW_H + 1;
+    rollCtx.fillStyle = "hsla(" + hue + ",85%," + Math.round(48 + 14 * (1 - n.vel)) + "%," + alpha + ")";
+    rollCtx.fillRect(x, top, w, ROW_H - 2);
+    if (alpha < 0.9) return;
+    const fi = (n.fadeIn || 0) / 100;
+    const fo = (n.fadeOut || 0) / 100;
+    if (fi > 0) {
+      const g = rollCtx.createLinearGradient(x, 0, x + w * fi, 0);
+      g.addColorStop(0, "rgba(0,0,0,0.7)");
+      g.addColorStop(1, "rgba(0,0,0,0)");
+      rollCtx.fillStyle = g;
+      rollCtx.fillRect(x, top, w * fi, ROW_H - 2);
+    }
+    if (fo > 0) {
+      const g = rollCtx.createLinearGradient(x + w, 0, x + w - w * fo, 0);
+      g.addColorStop(0, "rgba(0,0,0,0.7)");
+      g.addColorStop(1, "rgba(0,0,0,0)");
+      rollCtx.fillStyle = g;
+      rollCtx.fillRect(x + w - w * fo, top, w * fo, ROW_H - 2);
+    }
+    rollCtx.strokeStyle = selected ? "#ffffff" : "rgba(0,0,0,0.5)";
+    rollCtx.lineWidth = n === sel ? 2.5 : selected ? 2 : 1;
+    rollCtx.strokeRect(x + 0.5, top + 0.5, w - 1, ROW_H - 3);
+    rollCtx.lineWidth = 1;
+    if (n.glide) {
+      rollCtx.strokeStyle = "rgba(255,255,255,0.95)";
+      rollCtx.lineWidth = 2;
+      rollCtx.beginPath();
+      rollCtx.moveTo(x + 2, r * ROW_H + ROW_H / 2);
+      rollCtx.lineTo(x + w - 2, r * ROW_H + ROW_H / 2 - n.glide * ROW_H);
+      rollCtx.stroke();
+      rollCtx.lineWidth = 1;
+    }
+  }
+
   function drawRoll() {
     const w = LABEL_W + stepW * totalSteps();
-    const h = ROWS * ROW_H;
+    const h = rowsHeight();
     const light = document.documentElement.dataset.theme === "light";
     const ink = light ? "#1a0b0f" : "#f3e9e9";
-    rollCtx.clearRect(0, 0, w, h);
+    const trk = noteTrack();
+    rollCtx.clearRect(0, 0, w, rollHeight());
+    rollCtx.save();
+    rollCtx.translate(0, HEAD);
     for (let r = 0; r < ROWS; r++) {
       const midi = midiOf(r);
       const black = BLACK.includes(midi % 12);
@@ -546,6 +1093,13 @@
         rollCtx.fillRect(LABEL_W, r * ROW_H, w - LABEL_W, ROW_H);
       }
     }
+    if (trk && trk.type === "sampler" && trk.sample) {
+      const rr = rowOf(trk.sample.root === undefined ? 60 : trk.sample.root);
+      if (rr >= 0 && rr < ROWS) {
+        rollCtx.fillStyle = "rgba(80,220,170,0.16)";
+        rollCtx.fillRect(LABEL_W, rr * ROW_H, w - LABEL_W, ROW_H);
+      }
+    }
     drawKeys(h);
     for (let s = 0; s <= totalSteps(); s++) {
       const x = LABEL_W + s * stepW + 0.5;
@@ -557,48 +1111,71 @@
       rollCtx.lineTo(x, h);
       rollCtx.stroke();
     }
-    S.notes.forEach((n) => {
-      const r = rowOf(n.midi);
-      if (r < 0 || r >= ROWS) return;
-      const x = LABEL_W + n.start * stepW;
-      const nw = Math.max(4, n.len * stepW - 1);
-      rollCtx.fillStyle = "hsla(" + (HUES[n.inst || K.getInstrument()] || 355) + ",85%," + Math.round(48 + 14 * (1 - n.vel)) + "%,0.95)";
-      rollCtx.fillRect(x, r * ROW_H + 1, nw, ROW_H - 2);
-      const top = r * ROW_H + 1;
-      const fi = (n.fadeIn || 0) / 100;
-      const fo = (n.fadeOut || 0) / 100;
-      if (fi > 0) {
-        const g = rollCtx.createLinearGradient(x, 0, x + nw * fi, 0);
-        g.addColorStop(0, "rgba(0,0,0,0.7)");
-        g.addColorStop(1, "rgba(0,0,0,0)");
-        rollCtx.fillStyle = g;
-        rollCtx.fillRect(x, top, nw * fi, ROW_H - 2);
-      }
-      if (fo > 0) {
-        const g = rollCtx.createLinearGradient(x + nw, 0, x + nw - nw * fo, 0);
-        g.addColorStop(0, "rgba(0,0,0,0.7)");
-        g.addColorStop(1, "rgba(0,0,0,0)");
-        rollCtx.fillStyle = g;
-        rollCtx.fillRect(x + nw - nw * fo, top, nw * fo, ROW_H - 2);
-      }
-      rollCtx.strokeStyle = n === sel ? "#ffffff" : "rgba(0,0,0,0.5)";
-      rollCtx.lineWidth = n === sel ? 2 : 1;
-      rollCtx.strokeRect(x + 0.5, top + 0.5, nw - 1, ROW_H - 3);
-      rollCtx.lineWidth = 1;
-      if (n.glide) {
-        rollCtx.strokeStyle = "rgba(255,255,255,0.95)";
-        rollCtx.lineWidth = 2;
-        rollCtx.beginPath();
-        rollCtx.moveTo(x + 2, r * ROW_H + ROW_H / 2);
-        rollCtx.lineTo(x + nw - 2, r * ROW_H + ROW_H / 2 - n.glide * ROW_H);
-        rollCtx.stroke();
-        rollCtx.lineWidth = 1;
-      }
+    // the other tracks' notes, faint, so you can write against them
+    S.tracks.forEach((other) => {
+      if (other === trk || !isNoteKind(other)) return;
+      other.notes.forEach((n) => drawNote(n, 215, 0.2, false));
     });
+    if (trk) trk.notes.forEach((n) => drawNote(n, HUES[n.inst || trk.inst] || (trk.type === "sampler" ? HUES.sample : 355), 0.95, selSet.has(n)));
+    if (drag && drag.mode === "marquee") {
+      const x = Math.min(drag.x0, drag.x1), y = Math.min(drag.y0, drag.y1) - HEAD;
+      rollCtx.fillStyle = "rgba(255,255,255,0.12)";
+      rollCtx.strokeStyle = "rgba(255,255,255,0.8)";
+      rollCtx.setLineDash([4, 3]);
+      rollCtx.fillRect(x, y, Math.abs(drag.x1 - drag.x0), Math.abs(drag.y1 - drag.y0));
+      rollCtx.strokeRect(x + 0.5, y + 0.5, Math.abs(drag.x1 - drag.x0), Math.abs(drag.y1 - drag.y0));
+      rollCtx.setLineDash([]);
+    }
+    rollCtx.restore();
+
+    // the ruler: bar numbers, beat ticks, and a click-to-jump strip
+    rollCtx.fillStyle = light ? "rgba(80,10,12,0.08)" : "rgba(255,238,238,0.07)";
+    rollCtx.fillRect(0, 0, w, HEAD);
+    rollCtx.fillStyle = light ? "#5a1a1f" : "#cdbdbd";
+    rollCtx.font = "600 10px sans-serif";
+    rollCtx.textBaseline = "middle";
+    rollCtx.fillText("Bar", 8, HEAD / 2);
+    for (let s = 0; s <= totalSteps(); s += 4) {
+      const x = LABEL_W + s * stepW + 0.5;
+      rollCtx.strokeStyle = light ? "rgba(80,10,12,0.4)" : "rgba(255,238,238,0.35)";
+      rollCtx.beginPath();
+      rollCtx.moveTo(x, s % STEPS === 0 ? 3 : HEAD - 7);
+      rollCtx.lineTo(x, HEAD);
+      rollCtx.stroke();
+      if (s % STEPS === 0 && s < totalSteps()) rollCtx.fillText(String(s / STEPS + 1), x + 4, HEAD / 2);
+    }
+
+    // the sustain pedal lane
+    const fy = HEAD + h;
+    rollCtx.fillStyle = light ? "rgba(80,10,12,0.06)" : "rgba(255,238,238,0.05)";
+    rollCtx.fillRect(LABEL_W, fy, w - LABEL_W, FOOT);
+    rollCtx.fillStyle = light ? "#5a1a1f" : "#cdbdbd";
+    rollCtx.fillText("Pedal", 8, fy + FOOT / 2);
+    if (trk && trk.type !== "sampler") {
+      trk.pedal.forEach((p) => {
+        const x = LABEL_W + p.start * stepW;
+        rollCtx.fillStyle = "rgba(255,200,80,0.85)";
+        rollCtx.fillRect(x, fy + 4, Math.max(4, p.len * stepW - 1), FOOT - 8);
+        rollCtx.fillStyle = "#2a1a00";
+        rollCtx.font = "700 10px sans-serif";
+        rollCtx.fillText("sustain", x + 5, fy + FOOT / 2);
+        rollCtx.font = "600 10px sans-serif";
+      });
+    } else {
+      rollCtx.fillStyle = "rgba(255,238,238,0.3)";
+      rollCtx.fillText("not used by a sampler", LABEL_W + 8, fy + FOOT / 2);
+    }
+
     if (playing || paused) {
       const x = LABEL_W + position() * stepW;
-      rollCtx.fillStyle = ink;
-      rollCtx.fillRect(x, 0, 2, h);
+      rollCtx.fillStyle = "#ff3b3b";
+      rollCtx.fillRect(x - 1, 0, 2, rollHeight());
+      rollCtx.beginPath();
+      rollCtx.moveTo(x - 6, 0);
+      rollCtx.lineTo(x + 6, 0);
+      rollCtx.lineTo(x, 9);
+      rollCtx.closePath();
+      rollCtx.fill();
     }
     $("studio-roll-range").textContent = K.noteName(S.rollBase) + " – " + K.noteName(S.rollBase + ROWS - 1);
   }
@@ -644,8 +1221,9 @@
   }
 
   function noteAt(midi, step) {
-    for (let i = S.notes.length - 1; i >= 0; i--) {
-      const n = S.notes[i];
+    const notes = S.notes;
+    for (let i = notes.length - 1; i >= 0; i--) {
+      const n = notes[i];
       if (n.midi === midi && step >= n.start && step < n.start + n.len) return n;
     }
     return null;
@@ -655,70 +1233,161 @@
     const rect = roll.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
-    const row = Math.max(0, Math.min(ROWS - 1, Math.floor(y / ROW_H)));
-    return { x, row, midi: midiOf(row), step: (x - LABEL_W) / stepW };
+    const zone = y < HEAD ? "ruler" : y >= HEAD + rowsHeight() ? "foot" : "rows";
+    const row = clamp(Math.floor((y - HEAD) / ROW_H), 0, ROWS - 1);
+    return { x, y, zone, row, midi: midiOf(row), step: (x - LABEL_W) / stepW };
   }
 
   function preview(midi) {
+    const trk = noteTrack();
+    if (!trk) return;
     const e = engine();
-    playKey(e, midi, e.ctx.currentTime, 0.4, 0.8);
+    playKey(e, midi, e.ctx.currentTime, 0.4, 0.8, undefined, { release: trk.release || 0 }, trk);
+  }
+
+  function deleteNotes(list) {
+    const trk = noteTrack();
+    if (!trk || !list.length) return;
+    const gone = new Set(list);
+    trk.notes = trk.notes.filter((n) => !gone.has(n));
+    select(null);
+    save();
   }
 
   roll.addEventListener("contextmenu", (event) => {
     event.preventDefault();
+    const trk = noteTrack();
+    if (!trk) return;
     const p = rollPoint(event);
-    const n = noteAt(p.midi, Math.floor(p.step));
-    if (n) {
-      S.notes.splice(S.notes.indexOf(n), 1);
-      if (n === sel) select(null);
-      dirty = true;
-      save();
+    if (p.zone === "foot") {
+      const at = Math.floor(p.step);
+      const hit = trk.pedal.find((r) => at >= r.start && at < r.start + r.len);
+      if (hit) { trk.pedal.splice(trk.pedal.indexOf(hit), 1); dirty = true; save(); }
+      return;
     }
+    if (p.zone !== "rows") return;
+    const n = noteAt(p.midi, Math.floor(p.step));
+    if (n) deleteNotes(selSet.has(n) ? [...selSet] : [n]);
   });
 
   roll.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
+    const trk = noteTrack();
+    if (!trk) return;
     const p = rollPoint(event);
-    if (p.x < LABEL_W) { preview(p.midi); return; }
     const total = totalSteps();
-    const cell = Math.max(0, Math.min(total - 1, Math.floor(p.step)));
+    const additive = event.shiftKey || event.ctrlKey || event.metaKey;
+    if (p.zone === "ruler") {
+      if (p.x < LABEL_W) return;
+      roll.setPointerCapture(event.pointerId);
+      drag = { mode: "seek" };
+      seek(p.step);
+      return;
+    }
+    if (p.zone === "foot") {
+      if (trk.type === "sampler" || p.x < LABEL_W) return;
+      const at = clamp(Math.floor(p.step), 0, total - 1);
+      const hit = trk.pedal.find((r) => at >= r.start && at < r.start + r.len);
+      roll.setPointerCapture(event.pointerId);
+      if (hit) {
+        const edge = LABEL_W + (hit.start + hit.len) * stepW - p.x < 8;
+        drag = { mode: edge ? "pedalresize" : "pedalmove", region: hit, grab: p.step - hit.start };
+      } else {
+        const begin = Math.floor(at / S.snap) * S.snap;
+        const region = { start: begin, len: Math.min(S.snap * 2, total - begin) };
+        trk.pedal.push(region);
+        drag = { mode: "pedalresize", region, grab: 0 };
+      }
+      dirty = true;
+      return;
+    }
+    if (p.x < LABEL_W) { preview(p.midi); return; }
+    const cell = clamp(Math.floor(p.step), 0, total - 1);
     const snapped = Math.floor(cell / S.snap) * S.snap;
     const hit = noteAt(p.midi, cell);
     roll.setPointerCapture(event.pointerId);
-    select(hit || null);
+    if (hit && additive) {
+      if (selSet.has(hit)) selSet.delete(hit); else selSet.add(hit);
+      sel = selSet.has(hit) ? hit : ([...selSet].pop() || null);
+      syncEditor();
+      dirty = true;
+      drag = { mode: "none" };
+      return;
+    }
     if (hit) {
+      if (!selSet.has(hit)) select(hit);
+      else { sel = hit; syncEditor(); }
       const edge = LABEL_W + (hit.start + hit.len) * stepW - p.x < 8;
-      drag = { note: hit, mode: edge ? "resize" : "move", grab: p.step - hit.start };
+      const group = [...selSet].map((n) => ({ note: n, start0: n.start, len0: n.len, midi0: n.midi }));
+      drag = { mode: edge ? "resize" : "move", primary: hit, group, p0: { step: p.step, midi: p.midi }, grab: p.step - hit.start, end0: hit.start + hit.len, lastDm: 0 };
+    } else if (S.tool === "select" || additive) {
+      drag = { mode: "marquee", x0: p.x, y0: p.y, x1: p.x, y1: p.y, add: additive };
     } else {
-      const note = { midi: p.midi, start: snapped, len: Math.min(Math.max(lastLen, S.snap), total - snapped), vel: 0.8, inst: K.getInstrument() };
-      S.notes.push(note);
+      const note = { midi: p.midi, start: snapped, len: Math.min(Math.max(lastLen, S.snap), total - snapped), vel: 0.8, inst: trk.type === "sampler" ? undefined : trk.inst };
+      trk.notes.push(note);
       select(note);
       preview(p.midi);
-      drag = { note, mode: "new", grab: 0 };
+      drag = { mode: "new", primary: note, group: [{ note, start0: note.start, len0: note.len, midi0: note.midi }], grab: 0 };
     }
     dirty = true;
   });
 
   roll.addEventListener("pointermove", (event) => {
-    if (!drag) return;
+    if (!drag || drag.mode === "none") return;
     const p = rollPoint(event);
     const total = totalSteps();
-    const n = drag.note;
+    if (drag.mode === "seek") { seek(clamp(p.step, 0, total - 1)); return; }
+    if (drag.mode === "marquee") { drag.x1 = p.x; drag.y1 = p.y; dirty = true; return; }
+    if (drag.mode === "pedalmove") {
+      const r = drag.region;
+      r.start = clamp(Math.round((p.step - drag.grab) / S.snap) * S.snap, 0, total - r.len);
+      dirty = true;
+      return;
+    }
+    if (drag.mode === "pedalresize") {
+      const r = drag.region;
+      r.len = clamp(Math.round(p.step / S.snap) * S.snap - r.start, S.snap, total - r.start);
+      dirty = true;
+      return;
+    }
     if (drag.mode === "move") {
-      const start = Math.round((p.step - drag.grab) / S.snap) * S.snap;
-      n.start = Math.max(0, Math.min(total - n.len, start));
-      if (p.midi !== n.midi) { n.midi = p.midi; preview(p.midi); }
+      const g = drag.group;
+      const minStart = Math.min(...g.map((o) => o.start0));
+      const maxEnd = Math.max(...g.map((o) => o.start0 + o.len0));
+      const minMidi = Math.min(...g.map((o) => o.midi0));
+      const maxMidi = Math.max(...g.map((o) => o.midi0));
+      const ds = clamp(Math.round((p.step - drag.p0.step) / S.snap) * S.snap, -minStart, total - maxEnd);
+      const dm = clamp(p.midi - drag.p0.midi, 21 - minMidi, 108 - maxMidi);
+      g.forEach((o) => { o.note.start = o.start0 + ds; o.note.midi = o.midi0 + dm; });
+      if (dm !== drag.lastDm) { drag.lastDm = dm; preview(drag.primary.midi); }
     } else {
       const end = Math.round(p.step / S.snap) * S.snap;
-      n.len = Math.max(S.snap, Math.min(total - n.start, end - n.start));
+      const delta = end - drag.end0;
+      drag.group.forEach((o) => {
+        o.note.len = clamp(drag.mode === "new" ? end - o.start0 : o.len0 + delta, S.snap, total - o.start0);
+      });
     }
     dirty = true;
   });
 
   function endDrag() {
     if (!drag) return;
-    lastLen = drag.note.len;
+    const d = drag;
     drag = null;
+    if (d.mode === "marquee") {
+      const w = Math.abs(d.x1 - d.x0), h = Math.abs(d.y1 - d.y0);
+      if (w < 4 && h < 4) { if (!d.add) select(null); dirty = true; return; }
+      const x0 = (Math.min(d.x0, d.x1) - LABEL_W) / stepW, x1 = (Math.max(d.x0, d.x1) - LABEL_W) / stepW;
+      const y0 = (Math.min(d.y0, d.y1) - HEAD) / ROW_H, y1 = (Math.max(d.y0, d.y1) - HEAD) / ROW_H;
+      const inside = S.notes.filter((n) => {
+        const r = rowOf(n.midi);
+        return n.start < x1 && n.start + n.len > x0 && r + 1 > y0 && r < y1;
+      });
+      selectMany(d.add ? [...selSet, ...inside] : inside);
+      return;
+    }
+    if (d.mode === "seek" || d.mode === "none") return;
+    if (d.primary) lastLen = d.primary.len;
     save();
   }
   roll.addEventListener("pointerup", endDrag);
@@ -727,13 +1396,12 @@
   $("studio-snap").addEventListener("change", (event) => { S.snap = Number(event.target.value); save(); });
   $("studio-roll-up").addEventListener("click", () => rollShift(12));
   $("studio-roll-down").addEventListener("click", () => rollShift(-12));
-  $("studio-roll-clear").addEventListener("click", () => { S.notes = []; select(null); dirty = true; save(); });
+  $("studio-roll-clear").addEventListener("click", () => { const t = noteTrack(); if (t) { t.notes = []; t.pedal = []; } select(null); dirty = true; save(); });
 
-  // ---------- shade a scale on the roll ----------
-  const SCALES = {
-    "Natural minor": [0, 2, 3, 5, 7, 8, 10], "Harmonic minor": [0, 2, 3, 5, 7, 8, 11], Dorian: [0, 2, 3, 5, 7, 9, 10],
-    "Phrygian dominant": [0, 1, 4, 5, 7, 8, 10], Lydian: [0, 2, 4, 6, 7, 9, 11], Major: [0, 2, 4, 5, 7, 9, 11],
-  };
+  // ---------- shade a scale on the roll (the list comes from the Scales page's data) ----------
+  const SCALES = {};
+  (SCALE_DATA.length ? SCALE_DATA : [{ name: "Major", steps: [0, 2, 4, 5, 7, 9, 11] }, { name: "Natural minor", steps: [0, 2, 3, 5, 7, 8, 10] }])
+    .forEach((s) => { SCALES[s.name] = s.steps; });
   const scaleKey = $("studio-scale-key");
   const scaleMode = $("studio-scale-mode");
   ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"].forEach((n, i) => scaleKey.add(new Option(n, String(i))));
@@ -751,26 +1419,44 @@
   scaleMode.addEventListener("change", applyScale);
 
   // ---------- the note editor: sound, volume, slide and fades for one note (or several) ----------
+  const instSelect = $("main-keyboard-instrument");
   const ed = {
     box: $("studio-note-editor"), title: $("studio-note-title"), inst: $("studio-note-inst"), scope: $("studio-note-scope"),
     vel: $("studio-note-vel"), glide: $("studio-note-glide"), fadeIn: $("studio-note-fadein"), fadeOut: $("studio-note-fadeout"),
   };
-  ed.inst.innerHTML = $("main-keyboard-instrument").innerHTML;
+  ed.inst.innerHTML = instSelect.innerHTML;
   ed.box.querySelectorAll("input, select, button").forEach((el) => { el.disabled = true; });
 
   function select(note) {
-    sel = note;
+    sel = note || null;
+    selSet = new Set(note ? [note] : []);
+    syncEditor();
+  }
+
+  function selectMany(list) {
+    const unique = [...new Set(list)];
+    selSet = new Set(unique);
+    sel = unique.length ? unique[unique.length - 1] : null;
+    syncEditor();
+  }
+
+  function syncEditor() {
+    const note = sel;
+    const trk = noteTrack();
     ed.box.classList.toggle("studio-note-editor-empty", !note);
     ed.box.querySelectorAll("input, select, button").forEach((el) => { el.disabled = !note; });
-    if (!note) { ed.title.textContent = "No note selected"; dirty = true; return; }
-    ed.title.textContent = K.noteName(note.midi) + " · " + note.len + " step" + (note.len > 1 ? "s" : "");
-    ed.inst.value = note.inst || K.getInstrument();
+    dirty = true;
+    if (!note) { ed.title.textContent = "No note selected"; return; }
+    ed.title.textContent = selSet.size > 1
+      ? selSet.size + " notes selected"
+      : K.noteName(note.midi) + " · " + note.len + " step" + (note.len > 1 ? "s" : "");
+    ed.inst.value = note.inst || (trk && trk.inst) || K.getInstrument();
+    ed.inst.disabled = !!(trk && trk.type === "sampler");
     ed.vel.value = Math.round(note.vel * 100);
     ed.glide.value = note.glide || 0;
     ed.fadeIn.value = note.fadeIn || 0;
     ed.fadeOut.value = note.fadeOut || 0;
     showEditorValues();
-    dirty = true;
   }
 
   function showEditorValues() {
@@ -783,7 +1469,10 @@
 
   function scopeNotes() {
     if (!sel) return [];
-    if (ed.scope.value === "sound") return S.notes.filter((n) => (n.inst || K.getInstrument()) === (sel.inst || K.getInstrument()));
+    const trk = noteTrack();
+    const own = (n) => n.inst || (trk && trk.inst);
+    if (selSet.size > 1 && ed.scope.value === "one") return [...selSet];
+    if (ed.scope.value === "sound") return S.notes.filter((n) => own(n) === own(sel));
     if (ed.scope.value === "chord") return S.notes.filter((n) => n.start === sel.start);
     return [sel];
   }
@@ -796,37 +1485,132 @@
     save();
   }
 
-  ed.inst.addEventListener("change", () => edit((n) => { n.inst = ed.inst.value; }));
+  ed.inst.addEventListener("change", () => {
+    edit((n) => { n.inst = ed.inst.value; });
+    setTrackInst(noteTrack(), ed.inst.value); // the next notes you place use the sound you just chose
+  });
   ed.vel.addEventListener("input", () => edit((n) => { n.vel = Math.max(0.05, Number(ed.vel.value) / 100); }));
   ed.glide.addEventListener("input", () => edit((n) => { n.glide = Number(ed.glide.value); }));
   ed.fadeIn.addEventListener("input", () => edit((n) => { n.fadeIn = Number(ed.fadeIn.value); }));
   ed.fadeOut.addEventListener("input", () => edit((n) => { n.fadeOut = Number(ed.fadeOut.value); }));
   $("studio-note-hear").addEventListener("click", () => {
     if (!sel) return;
+    const trk = noteTrack();
     const e = engine();
-    playKey(e, sel.midi, e.ctx.currentTime + 0.02, Math.max(0.08, sel.len * stepLength()), sel.vel, sel.inst, noteOpts(sel));
+    playKey(e, sel.midi, e.ctx.currentTime + 0.02, Math.max(0.08, sel.len * stepLength() + (trk ? pedalHold(trk, sel, stepLength()) : 0)), sel.vel, sel.inst, noteOpts(sel, trk), trk);
   });
-  $("studio-note-delete").addEventListener("click", () => {
-    if (!sel) return;
-    S.notes.splice(S.notes.indexOf(sel), 1);
-    select(null);
-    save();
-  });
+  $("studio-note-delete").addEventListener("click", () => deleteNotes(selSet.size ? [...selSet] : [sel]));
   document.addEventListener("keydown", (event) => {
     if (tab !== "roll" || !sel) return;
     if (event.key !== "Delete" && event.key !== "Backspace") return;
     if (/^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName)) return;
     event.preventDefault();
-    S.notes.splice(S.notes.indexOf(sel), 1);
-    select(null);
-    save();
+    deleteNotes([...selSet]);
   });
 
   function rollShift(delta) {
-    S.rollBase = Math.max(24, Math.min(84, S.rollBase + delta));
+    S.rollBase = clamp(S.rollBase + delta, 24, 84);
     dirty = true;
     save();
   }
+
+  // ---------- roll tools: move, tidy and copy whole groups of notes ----------
+  const toolNotes = () => (selSet.size ? [...selSet] : S.notes);
+  function toolDone() { syncEditor(); dirty = true; save(); }
+
+  function transposeNotes(by) {
+    const ns = toolNotes();
+    if (!ns.length || ns.some((n) => n.midi + by < 21 || n.midi + by > 108)) return;
+    ns.forEach((n) => { n.midi += by; });
+    preview(ns[0].midi);
+    toolDone();
+  }
+
+  function quantizeNotes() {
+    const total = totalSteps(), q = S.snap;
+    toolNotes().forEach((n) => {
+      n.start = clamp(Math.round(n.start / q) * q, 0, total - 1);
+      n.len = clamp(Math.max(q, Math.round(n.len / q) * q), 1, total - n.start);
+      n.off = 0;
+    });
+    toolDone();
+  }
+
+  // Humanize: a little random in the loudness and in the timing, so a pattern stops sounding like a machine.
+  function humanizeNotes() {
+    toolNotes().forEach((n) => {
+      n.vel = clamp(n.vel + (Math.random() - 0.5) * 0.24, 0.15, 1);
+      n.off = clamp((Math.random() - 0.5) * 0.4, -0.2, 0.2);
+    });
+    toolDone();
+  }
+
+  function randomVelocity() {
+    toolNotes().forEach((n) => { n.vel = 0.4 + Math.random() * 0.6; });
+    toolDone();
+  }
+
+  // Legato: stretch each note until the next one starts.
+  function legatoNotes() {
+    const ns = toolNotes().slice().sort((a, b) => a.start - b.start);
+    const total = totalSteps();
+    ns.forEach((n) => {
+      const next = ns.find((o) => o.start > n.start);
+      if (next) n.len = Math.max(1, next.start - n.start);
+      else n.len = Math.max(n.len, 1);
+      n.len = Math.min(n.len, total - n.start);
+    });
+    toolDone();
+  }
+
+  function selectAll() { selectMany(S.notes); }
+
+  function copyNotes(cut) {
+    if (!selSet.size) return;
+    const ns = [...selSet];
+    const from = Math.min(...ns.map((n) => n.start));
+    const to = Math.max(...ns.map((n) => n.start + n.len));
+    clipboard = { notes: ns.map((n) => ({ ...n, start: n.start - from })), span: to - from };
+    pasteAt = to;
+    if (cut) deleteNotes(ns);
+    syncClipboardButtons();
+  }
+
+  // Paste at the playhead; with the playhead at the start, copies land one after another.
+  function pasteNotes() {
+    const trk = noteTrack();
+    if (!clipboard || !trk) return;
+    const total = totalSteps();
+    let at = (playing || paused) && position() >= 1 ? Math.round(position()) : pasteAt;
+    at = Math.floor(at / S.snap) * S.snap;
+    if (at + clipboard.span > total) at = Math.max(0, total - clipboard.span);
+    const made = clipboard.notes.filter((n) => n.start + at < total).map((n) => ({ ...n, start: n.start + at, len: Math.max(1, Math.min(n.len, total - n.start - at)) }));
+    trk.notes.push(...made);
+    pasteAt = at + clipboard.span;
+    selectMany(made);
+    save();
+  }
+
+  function syncClipboardButtons() {
+    const paste = $("studio-roll-paste");
+    if (paste) paste.disabled = !clipboard;
+  }
+
+  function setTool(name) {
+    S.tool = name;
+    $("studio-tool-draw").setAttribute("aria-pressed", String(name === "draw"));
+    $("studio-tool-select").setAttribute("aria-pressed", String(name === "select"));
+    roll.classList.toggle("studio-roll-select-tool", name === "select");
+  }
+
+  const ROLL_ACTIONS = {
+    up12: () => transposeNotes(12), up1: () => transposeNotes(1), down1: () => transposeNotes(-1), down12: () => transposeNotes(-12),
+    quantize: quantizeNotes, humanize: humanizeNotes, legato: legatoNotes, velocity: randomVelocity,
+    all: selectAll, copy: () => copyNotes(false), cut: () => copyNotes(true), paste: pasteNotes,
+  };
+  document.querySelectorAll("[data-roll-action]").forEach((b) => b.addEventListener("click", () => ROLL_ACTIONS[b.dataset.rollAction]()));
+  $("studio-tool-draw").addEventListener("click", () => setTool("draw"));
+  $("studio-tool-select").addEventListener("click", () => setTool("select"));
 
   // ---------- recording the keys ----------
   const held = new Map(); // midi -> { step, time }
@@ -834,6 +1618,8 @@
 
   board.onNote((midi, isOn) => {
     if (!recording || !playing) return;
+    const trk = noteTrack();
+    if (!trk) return;
     const e = engine();
     if (isOn) {
       held.set(midi, { step: Math.round(position()) % totalSteps(), time: e.ctx.currentTime });
@@ -841,11 +1627,551 @@
       const h = held.get(midi);
       held.delete(midi);
       const len = Math.max(1, Math.round((e.ctx.currentTime - h.time) / stepLength()));
-      S.notes.push({ midi, start: h.step, len: Math.min(len, totalSteps() - h.step), vel: 0.8, inst: K.getInstrument() });
+      trk.notes.push({ midi, start: h.step, len: Math.min(len, totalSteps() - h.step), vel: 0.8, inst: trk.type === "sampler" ? undefined : trk.inst });
       dirty = true;
       save();
     }
   });
+
+  // ---------- tracks: the list, the settings, adding and removing ----------
+  const trackList = $("studio-track-list");
+  const settingsBox = $("studio-track-settings");
+  const trackEls = {};
+  const INST_NAMES = {};
+  [...instSelect.options].forEach((o) => { INST_NAMES[o.value] = o.textContent; });
+
+  function kindLabel(t) {
+    if (t.type === "drums") return "8 voices";
+    if (t.type === "audio") return t.clips.length + (t.clips.length === 1 ? " clip" : " clips");
+    if (t.type === "sampler") return t.sample ? t.sample.name : "no sample yet";
+    return INST_NAMES[t.inst] || t.inst;
+  }
+
+  function renderTracks() {
+    trackList.textContent = "";
+    Object.keys(trackEls).forEach((k) => delete trackEls[k]);
+    S.tracks.forEach((trk) => {
+      const row = document.createElement("div");
+      row.className = "studio-track-row" + (trk.id === S.active ? " is-active" : "");
+      row.dataset.track = trk.id;
+      const name = document.createElement("button");
+      name.type = "button";
+      name.className = "studio-track-name";
+      name.title = "Work on " + trk.name;
+      const icon = document.createElement("span");
+      icon.className = "studio-track-icon";
+      icon.textContent = KINDS[trk.type].icon;
+      const title = document.createElement("span");
+      title.className = "studio-track-title";
+      title.textContent = trk.name;
+      const kind = document.createElement("span");
+      kind.className = "studio-track-kind";
+      kind.textContent = kindLabel(trk);
+      name.append(icon, title, kind);
+      name.addEventListener("click", () => { if (!learning) setActive(trk.id); });
+      const mute = document.createElement("button");
+      mute.type = "button";
+      mute.className = "studio-mix-mute";
+      mute.textContent = "M";
+      mute.dataset.target = "mute:" + trk.id;
+      mute.setAttribute("aria-label", "Mute " + trk.name);
+      mute.addEventListener("click", () => { if (!learning) toggleMute(trk.id); });
+      const solo = document.createElement("button");
+      solo.type = "button";
+      solo.className = "studio-mix-solo";
+      solo.textContent = "S";
+      solo.dataset.target = "solo:" + trk.id;
+      solo.setAttribute("aria-label", "Solo " + trk.name);
+      solo.addEventListener("click", () => { if (!learning) toggleSolo(trk.id); });
+      const vol = document.createElement("input");
+      vol.type = "range";
+      vol.min = 0;
+      vol.max = 100;
+      vol.className = "studio-track-vol";
+      vol.dataset.target = "vol:" + trk.id;
+      vol.setAttribute("aria-label", trk.name + " volume");
+      vol.addEventListener("input", () => setVol(trk.id, vol.value / 100));
+      const pan = document.createElement("input");
+      pan.type = "range";
+      pan.min = -100;
+      pan.max = 100;
+      pan.className = "studio-track-pan";
+      pan.dataset.target = "pan:" + trk.id;
+      pan.setAttribute("aria-label", trk.name + " pan");
+      pan.addEventListener("input", () => setPan(trk.id, pan.value / 100));
+      pan.addEventListener("dblclick", () => setPan(trk.id, 0));
+      row.append(name, mute, solo, vol, pan);
+      trackList.appendChild(row);
+      trackEls[trk.id] = { row, title, kind, mute, solo, vol, pan };
+      syncMixerUi(trk.id);
+    });
+  }
+
+  function refreshTrackLabels() {
+    S.tracks.forEach((t) => {
+      const els = trackEls[t.id];
+      if (!els) return;
+      els.title.textContent = t.name;
+      els.kind.textContent = kindLabel(t);
+      els.row.classList.toggle("is-active", t.id === S.active);
+    });
+  }
+
+  function setTrackInst(trk, name) {
+    if (!trk || !isNoteKind(trk) || !INST_NAMES[name]) return;
+    trk.inst = name;
+    if (trk.id === (noteTrack() || {}).id) { K.setInstrument(name); instSelect.value = name; }
+    refreshTrackLabels();
+    save();
+  }
+
+  // the Sound menu above the keys sets the sound of the track you are working on
+  instSelect.addEventListener("change", () => {
+    const trk = noteTrack();
+    if (trk && trk.type !== "sampler") { trk.inst = instSelect.value; renderSettings(); refreshTrackLabels(); save(); }
+  });
+
+  function setActive(id, keepTab) {
+    const trk = trackById(id);
+    if (!trk) return;
+    S.active = id;
+    if (trk.type === "drums") lastDrumId = id;
+    if (isNoteKind(trk)) lastNoteId = id;
+    select(null);
+    audioSel = null;
+    const nt = noteTrack();
+    if (nt && nt.type !== "sampler") { K.setInstrument(nt.inst); instSelect.value = nt.inst; }
+    try { localStorage.setItem(STORE_KEY + "-active", id); } catch (error) { /* fine */ }
+    refreshTrackLabels();
+    renderSettings();
+    paint();
+    if (!keepTab) showTab(trk.type === "drums" ? "seq" : "roll");
+    else updateRollMode();
+    dirty = true;
+  }
+
+  function addTrack(type) {
+    if (!KINDS[type]) return;
+    const trk = newTrack(type);
+    S.tracks.push(trk);
+    if (live) ensureChannels(live);
+    registerTargets();
+    renderTracks();
+    renderMixer();
+    setActive(trk.id);
+    save();
+  }
+
+  function removeTrack(id) {
+    const trk = trackById(id);
+    if (!trk || trk.builtin) return;
+    if (mic && mic.trk === trk) finishAudioRecording();
+    S.tracks = S.tracks.filter((t) => t !== trk);
+    delete S.mixer[id];
+    if (live && live.ch[id]) live.ch[id].input.gain.value = 0;
+    killSources();
+    if (!S.tracks.some(isNoteKind)) S.tracks.push(newTrack("inst", "Keys"));
+    if (lastDrumId === id) lastDrumId = "drums";
+    if (lastNoteId === id) lastNoteId = (S.tracks.find(isNoteKind) || {}).id || "";
+    registerTargets();
+    renderTracks();
+    renderMixer();
+    setActive(S.active === id ? (S.tracks.find(isNoteKind) || S.tracks[0]).id : S.active, true);
+    save();
+  }
+
+  document.querySelectorAll(".studio-add-track-button").forEach((b) => b.addEventListener("click", () => addTrack(b.dataset.type)));
+  const importInput = $("studio-import-audio");
+  if (importInput) {
+    $("studio-import-button").addEventListener("click", () => importInput.click());
+    importInput.addEventListener("change", () => {
+      const files = Array.from(importInput.files || []);
+      importInput.value = "";
+      if (files.length) importAudioFiles(files);
+    });
+  }
+
+  // ---------- the settings for the track you are working on ----------
+  function field(label, control) {
+    const wrap = document.createElement("label");
+    wrap.className = "studio-preset-label studio-setting";
+    const span = document.createElement("span");
+    span.textContent = label;
+    wrap.append(span, control);
+    return wrap;
+  }
+
+  function sliderField(label, min, max, step, value, fmt, onInput) {
+    const wrap = document.createElement("label");
+    wrap.className = "studio-note-editor-slider studio-setting";
+    const span = document.createElement("span");
+    const out = document.createElement("output");
+    out.textContent = fmt(value);
+    span.append(label + " ", out);
+    const input = document.createElement("input");
+    input.type = "range";
+    input.min = min;
+    input.max = max;
+    input.step = step;
+    input.value = value;
+    input.addEventListener("input", () => { out.textContent = fmt(Number(input.value)); onInput(Number(input.value)); });
+    wrap.append(span, input);
+    return wrap;
+  }
+
+  function smallButton(text, onClick, id) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "studio-small-button";
+    b.textContent = text;
+    if (id) b.id = id;
+    b.addEventListener("click", onClick);
+    return b;
+  }
+
+  function fileField(label, accept, onFile) {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = accept;
+    input.addEventListener("change", () => { if (input.files && input.files[0]) onFile(input.files[0]); input.value = ""; });
+    return field(label, input);
+  }
+
+  const noteName = (m) => K.noteName(m);
+  const stripExt = (n) => n.replace(/\.[a-z0-9]{2,5}$/i, "").slice(0, 40) || "sample";
+
+  async function loadSampleFile(file, trk) {
+    if (file.size > 25 * 1048576) { setSettingsNote("That file is over 25 MB. Try a shorter one."); return; }
+    try {
+      setSettingsNote("Loading…");
+      const id = await storeAudio(file);
+      trk.sample = { id, name: stripExt(file.name), root: trk.sample ? trk.sample.root : 60, whole: trk.sample ? trk.sample.whole : true };
+      refreshTrackLabels();
+      renderSettings();
+      dirty = true;
+      save();
+    } catch (error) { setSettingsNote("Could not read that file. Try a WAV, MP3 or OGG."); }
+  }
+
+  async function importClip(file, trk) {
+    if (file.size > 25 * 1048576) { setSettingsNote("That file is over 25 MB. Try a shorter one."); return; }
+    try {
+      setSettingsNote("Loading…");
+      const id = await storeAudio(file);
+      const at = playing || paused ? Math.round(position()) : 0;
+      const clip = { id, bufferId: id, name: stripExt(file.name), start: at, gain: 1 };
+      trk.clips.push(clip);
+      audioSel = clip;
+      refreshTrackLabels();
+      renderSettings();
+      dirty = true;
+      save();
+    } catch (error) { setSettingsNote("Could not read that file. Try a WAV, MP3 or OGG."); }
+  }
+
+  // "Import audio": every file becomes its own Voice / Audio track, and the loop grows to fit it
+  async function importAudioFiles(files) {
+    for (const file of files) {
+      addTrack("audio");
+      const trk = S.tracks[S.tracks.length - 1];
+      trk.name = stripExt(file.name).slice(0, 24) || trk.name;
+      await importClip(file, trk);
+      const clip = trk.clips[trk.clips.length - 1];
+      const buf = clip && audio.buffers[clip.bufferId];
+      if (buf) {
+        const bars = Math.ceil(buf.duration / stepLength() / STEPS);
+        const fit = [1, 2, 4, 8, 16].find((b) => b >= bars) || 16;
+        if (fit > S.bars) setBars(fit);
+      }
+      renderTracks();
+      dirty = true;
+      save();
+    }
+  }
+
+  function setSettingsNote(text) {
+    const n = $("studio-settings-note");
+    if (n) n.textContent = text;
+  }
+
+  function renderSettings() {
+    settingsBox.textContent = "";
+    const trk = activeTrack();
+    if (!trk) return;
+    const m = S.mixer[trk.id] || freshMix();
+    const row = document.createElement("div");
+    row.className = "studio-settings-row";
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.maxLength = 30;
+    nameInput.value = trk.name;
+    nameInput.className = "studio-name-input";
+    nameInput.disabled = trk.builtin;
+    nameInput.addEventListener("input", () => { trk.name = nameInput.value.slice(0, 30) || KINDS[trk.type].label; refreshTrackLabels(); save(); });
+    row.appendChild(field("Name", nameInput));
+
+    if (trk.type === "inst" || trk.type === "bass" || trk.type === "guitar") {
+      const sound = document.createElement("select");
+      sound.innerHTML = instSelect.innerHTML;
+      sound.value = trk.inst;
+      sound.addEventListener("change", () => setTrackInst(trk, sound.value));
+      row.appendChild(field("Sound", sound));
+      row.appendChild(sliderField("Release", 0, 4, 0.1, trk.release || 0, (v) => v.toFixed(1) + " s", (v) => { trk.release = v; save(); }));
+    } else if (trk.type === "sampler") {
+      row.appendChild(fileField("Load a sound", "audio/*", (f) => loadSampleFile(f, trk)));
+      row.appendChild(smallButton(mic && mic.trk === trk && mic.purpose === "sample" ? "■ Stop" : "● Record a sample", () => (mic ? finishAudioRecording() : startMic("sample", trk))));
+      const root = document.createElement("select");
+      for (let n = 24; n <= 96; n++) root.add(new Option(noteName(n), String(n)));
+      root.value = String(trk.sample ? trk.sample.root : 60);
+      root.disabled = !trk.sample;
+      root.addEventListener("change", () => { if (trk.sample) { trk.sample.root = Number(root.value); dirty = true; save(); } });
+      row.appendChild(field("Plays at its own pitch on", root));
+      const whole = document.createElement("input");
+      whole.type = "checkbox";
+      whole.checked = trk.sample ? trk.sample.whole !== false : true;
+      whole.disabled = !trk.sample;
+      whole.addEventListener("change", () => { if (trk.sample) { trk.sample.whole = whole.checked; save(); } });
+      const wholeLabel = document.createElement("label");
+      wholeLabel.className = "studio-check-label";
+      wholeLabel.append(whole, " Play the whole sound");
+      row.appendChild(wholeLabel);
+      const buffer = trk.sample && audio.buffers[trk.sample.id];
+      const info = document.createElement("p");
+      info.className = "studio-settings-info";
+      info.textContent = trk.sample ? (buffer ? trk.sample.name + " · " + buffer.duration.toFixed(2) + " s" : "Loading " + trk.sample.name + "…") : "Load a WAV, MP3 or OGG file, or record one. Then write notes on the Piano roll: higher notes play it higher.";
+      row.appendChild(info);
+    } else if (trk.type === "audio") {
+      const recording = mic && mic.trk === trk && mic.purpose === "clip";
+      const rec = smallButton(recording ? "■ Stop recording" : "● Record from the microphone", () => (mic ? finishAudioRecording() : startMic("clip", trk)));
+      rec.classList.toggle("is-recording", !!recording);
+      row.appendChild(rec);
+      row.appendChild(fileField("Add a file", "audio/*", (f) => importClip(f, trk)));
+      const info = document.createElement("p");
+      info.className = "studio-settings-info";
+      info.textContent = "Recording starts at the playhead and plays along with the loop. Use headphones, so the mic does not hear the speakers. Open the Piano roll tab to see and move your clips.";
+      row.appendChild(info);
+    } else {
+      const info = document.createElement("p");
+      info.className = "studio-settings-info";
+      info.textContent = trk.builtin
+        ? "Edit its pattern on the Sequencer tab, or play the pads. The eight drum voices also have their own faders on the Mixer."
+        : "A second drum machine with its own pattern and its own volume, pan and effects. Edit it on the Sequencer tab.";
+      row.appendChild(info);
+    }
+    settingsBox.appendChild(row);
+
+    const fx = document.createElement("div");
+    fx.className = "studio-settings-row studio-settings-fx";
+    const pct = (v) => Math.round(v * 100) + "%";
+    fx.appendChild(sliderField("Reverb", 0, 1, 0.05, m.rev || 0, pct, (v) => setFx(trk.id, "rev", v)));
+    fx.appendChild(sliderField("Echo", 0, 1, 0.05, m.del || 0, pct, (v) => setFx(trk.id, "del", v)));
+    fx.appendChild(sliderField("Drive", 0, 1, 0.05, m.drive || 0, pct, (v) => setFx(trk.id, "drive", v)));
+    fx.appendChild(sliderField("Tone", 0, 1, 0.05, m.tone === undefined ? 1 : m.tone, (v) => (v >= 0.98 ? "open" : pct(v)), (v) => setFx(trk.id, "tone", v)));
+    if (!trk.builtin) fx.appendChild(smallButton("Remove track", () => removeTrack(trk.id), "studio-track-remove"));
+    settingsBox.appendChild(fx);
+    const note = document.createElement("p");
+    note.className = "studio-settings-info";
+    note.id = "studio-settings-note";
+    note.setAttribute("role", "status");
+    settingsBox.appendChild(note);
+  }
+
+  // ---------- recording from the microphone ----------
+  let mic = null; // { stream, rec, chunks, purpose: "clip" | "sample", trk, startStep }
+
+  async function startMic(purpose, trk) {
+    if (mic) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+      setSettingsNote("This browser cannot record. Try Chrome, Edge or Firefox.");
+      return;
+    }
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    } catch (error) {
+      setSettingsNote("The microphone is blocked. Allow it in the address bar and try again.");
+      return;
+    }
+    const rec = new MediaRecorder(stream);
+    const chunks = [];
+    rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+    const session = { stream, rec, chunks, purpose, trk, startStep: 0 };
+    rec.onstop = () => finishMic(session, new Blob(chunks, { type: rec.mimeType || "audio/webm" }));
+    mic = session;
+    if (purpose === "clip") {
+      if (!playing) start(paused ? resumeStep : 0);
+      session.startStep = position();
+    }
+    rec.start();
+    renderSettings();
+    setSettingsNote(purpose === "clip" ? "Recording… press Stop (or Space) when you are done." : "Recording a sample… press Stop when you are done.");
+  }
+
+  function finishAudioRecording() {
+    if (mic && mic.rec.state !== "inactive") mic.rec.stop();
+  }
+
+  async function finishMic(session, blob) {
+    session.stream.getTracks().forEach((t) => t.stop());
+    if (mic === session) mic = null;
+    if (!blob.size || !trackById(session.trk.id)) { renderSettings(); return; }
+    try {
+      const id = await storeAudio(blob);
+      if (session.purpose === "sample") {
+        session.trk.sample = { id, name: "My recording", root: 60, whole: true };
+      } else {
+        const clip = { id, bufferId: id, name: "Take " + (session.trk.clips.length + 1), start: session.startStep, gain: 1 };
+        session.trk.clips.push(clip);
+        audioSel = clip;
+      }
+      refreshTrackLabels();
+      dirty = true;
+      save();
+    } catch (error) { setSettingsNote("Could not use that recording."); }
+    renderSettings();
+  }
+
+  // ---------- the audio lane: clips on a timeline ----------
+  const audioPanel = $("studio-audio-panel");
+  const lane = $("studio-audio-lane");
+  const laneCtx = lane.getContext("2d");
+  const LANE_H = 150;
+  let audioSel = null;
+
+  function sizeLane() {
+    const w = LABEL_W + stepW * totalSteps();
+    const dpr = window.devicePixelRatio || 1;
+    lane.style.width = w + "px";
+    lane.style.height = LANE_H + "px";
+    lane.width = Math.round(w * dpr);
+    lane.height = Math.round(LANE_H * dpr);
+    laneCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    dirty = true;
+  }
+
+  function clipRect(c) {
+    const b = audio.buffers[c.bufferId];
+    const steps = b ? b.duration / stepLength() : 4;
+    return { x: LABEL_W + c.start * stepW, w: Math.max(6, steps * stepW), steps };
+  }
+
+  function drawLane() {
+    const trk = activeTrack();
+    if (!trk || trk.type !== "audio") return;
+    const w = LABEL_W + stepW * totalSteps();
+    const light = document.documentElement.dataset.theme === "light";
+    laneCtx.clearRect(0, 0, w, LANE_H);
+    laneCtx.fillStyle = light ? "rgba(80,10,12,0.05)" : "rgba(255,238,238,0.04)";
+    laneCtx.fillRect(LABEL_W, HEAD, w - LABEL_W, LANE_H - HEAD);
+    for (let s = 0; s <= totalSteps(); s++) {
+      const x = LABEL_W + s * stepW + 0.5;
+      laneCtx.strokeStyle = s % STEPS === 0 ? (light ? "rgba(80,10,12,0.6)" : "rgba(255,238,238,0.5)")
+        : s % 4 === 0 ? (light ? "rgba(80,10,12,0.3)" : "rgba(255,238,238,0.2)") : (light ? "rgba(80,10,12,0.08)" : "rgba(255,238,238,0.06)");
+      laneCtx.beginPath();
+      laneCtx.moveTo(x, s % 4 === 0 ? HEAD - 7 : HEAD);
+      laneCtx.lineTo(x, LANE_H);
+      laneCtx.stroke();
+    }
+    laneCtx.fillStyle = light ? "#5a1a1f" : "#cdbdbd";
+    laneCtx.font = "600 10px sans-serif";
+    laneCtx.textBaseline = "middle";
+    laneCtx.fillText("Bar", 8, HEAD / 2);
+    for (let s = 0; s < totalSteps(); s += STEPS) laneCtx.fillText(String(s / STEPS + 1), LABEL_W + s * stepW + 4, HEAD / 2);
+    laneCtx.fillText(trk.name, 8, HEAD + 14);
+    trk.clips.forEach((c) => {
+      const r = clipRect(c);
+      const top = HEAD + 8, h = LANE_H - HEAD - 16;
+      laneCtx.fillStyle = c === audioSel ? "rgba(90,200,170,0.5)" : "rgba(90,200,170,0.3)";
+      laneCtx.fillRect(r.x, top, r.w, h);
+      const peaks = audio.peaks[c.bufferId];
+      if (peaks) {
+        laneCtx.fillStyle = "rgba(160,255,230,0.9)";
+        const cols = Math.max(1, Math.floor(r.w / 2));
+        for (let i = 0; i < cols; i++) {
+          const v = peaks[Math.min(peaks.length - 1, Math.floor((i / cols) * peaks.length))] * (c.gain === undefined ? 1 : c.gain);
+          const half = Math.min(h / 2, v * (h / 2));
+          laneCtx.fillRect(r.x + i * 2, top + h / 2 - half, 1.4, Math.max(1, half * 2));
+        }
+      }
+      laneCtx.strokeStyle = c === audioSel ? "#fff" : "rgba(90,200,170,0.9)";
+      laneCtx.lineWidth = c === audioSel ? 2 : 1;
+      laneCtx.strokeRect(r.x + 0.5, top + 0.5, r.w - 1, h - 1);
+      laneCtx.lineWidth = 1;
+      laneCtx.fillStyle = light ? "#0a2a22" : "#e8fff8";
+      laneCtx.fillText(c.name, r.x + 6, top + 10);
+    });
+    if (!trk.clips.length) {
+      laneCtx.fillStyle = light ? "#5a1a1f" : "#cdbdbd";
+      laneCtx.fillText("No clips yet. Record from the microphone or add a file in the track settings above.", LABEL_W + 14, HEAD + (LANE_H - HEAD) / 2);
+    }
+    if (playing || paused) {
+      const x = LABEL_W + position() * stepW;
+      laneCtx.fillStyle = "#ff3b3b";
+      laneCtx.fillRect(x - 1, 0, 2, LANE_H);
+    }
+    const gain = $("studio-clip-gain");
+    if (gain && document.activeElement !== gain) gain.value = String(Math.round(((audioSel && audioSel.gain !== undefined ? audioSel.gain : 1)) * 100));
+    $("studio-clip-remove").disabled = !audioSel;
+    gain.disabled = !audioSel;
+  }
+
+  function lanePoint(event) {
+    const rect = lane.getBoundingClientRect();
+    const x = event.clientX - rect.left, y = event.clientY - rect.top;
+    return { x, y, step: (x - LABEL_W) / stepW };
+  }
+
+  lane.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    const trk = activeTrack();
+    if (!trk || trk.type !== "audio") return;
+    const p = lanePoint(event);
+    lane.setPointerCapture(event.pointerId);
+    if (p.y < HEAD) { if (p.x >= LABEL_W) { audioDrag = { mode: "seek" }; seek(p.step); } return; }
+    const hit = [...trk.clips].reverse().find((c) => { const r = clipRect(c); return p.x >= r.x && p.x <= r.x + r.w; });
+    audioSel = hit || null;
+    audioDrag = hit ? { mode: "move", clip: hit, grab: p.step - hit.start } : null;
+    dirty = true;
+  });
+  let audioDrag = null;
+  lane.addEventListener("pointermove", (event) => {
+    if (!audioDrag) return;
+    const p = lanePoint(event);
+    if (audioDrag.mode === "seek") { seek(clamp(p.step, 0, totalSteps() - 1)); return; }
+    audioDrag.clip.start = Math.max(0, Math.round((p.step - audioDrag.grab) * 4) / 4);
+    dirty = true;
+  });
+  const endLaneDrag = () => { if (audioDrag && audioDrag.mode === "move") save(); audioDrag = null; };
+  lane.addEventListener("pointerup", endLaneDrag);
+  lane.addEventListener("pointercancel", endLaneDrag);
+  $("studio-clip-remove").addEventListener("click", () => {
+    const trk = activeTrack();
+    if (!trk || !audioSel) return;
+    trk.clips = trk.clips.filter((c) => c !== audioSel);
+    audioSel = null;
+    killSources();
+    refreshTrackLabels();
+    dirty = true;
+    save();
+  });
+  $("studio-clip-gain").addEventListener("input", () => {
+    if (audioSel) { audioSel.gain = Number($("studio-clip-gain").value) / 100; dirty = true; save(); }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (tab !== "roll" || !audioSel || (activeTrack() || {}).type !== "audio") return;
+    if (event.key !== "Delete" && event.key !== "Backspace") return;
+    if (/^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName)) return;
+    event.preventDefault();
+    $("studio-clip-remove").click();
+  });
+
+  // the roll tab shows notes for most tracks and the clip lane for an audio track
+  function updateRollMode() {
+    const audioMode = (activeTrack() || {}).type === "audio";
+    $("studio-roll-notes").hidden = audioMode;
+    audioPanel.hidden = !audioMode;
+    if (tab === "roll") { sizeRoll(); sizeLane(); }
+  }
 
   // ---------- the mixer ----------
   const mixer = $("studio-mixer");
@@ -908,18 +2234,27 @@
     label.textContent = name;
     strip.appendChild(label);
     mixer.appendChild(strip);
+    els.label = label;
     mixerEls[id] = els;
   }
 
-  CHANNELS.forEach((id) => makeStrip(id, NAME[id], false));
-  makeStrip("master", "Master", true);
+  function renderMixer() {
+    mixer.textContent = "";
+    Object.keys(mixerEls).forEach((k) => delete mixerEls[k]);
+    TRACK_IDS.forEach((id) => makeStrip(id, NAME[id], false));
+    S.tracks.forEach((t) => makeStrip(t.id, t.builtin ? "Drums" : t.name, false));
+    makeStrip("master", "Master", true);
+    channels().forEach(syncMixerUi);
+    syncMixerUi("master");
+  }
 
   const meterBuf = new Float32Array(512);
   const levels = {};
   function drawMeters() {
     if (!live) return;
-    CHANNELS.concat(["master"]).forEach((id) => {
-      const analyser = id === "master" ? live.masterAnalyser : live.ch[id].analyser;
+    Object.keys(mixerEls).forEach((id) => {
+      const analyser = id === "master" ? live.masterAnalyser : (live.ch[id] && live.ch[id].analyser);
+      if (!analyser) return;
       analyser.getFloatTimeDomainData(meterBuf);
       let peak = 0;
       for (let i = 0; i < meterBuf.length; i++) peak = Math.max(peak, Math.abs(meterBuf[i]));
@@ -934,17 +2269,99 @@
     tab = name;
     document.querySelectorAll(".studio-tab").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
     ["seq", "roll", "mix"].forEach((t) => { $("studio-panel-" + t).hidden = t !== name; });
-    if (name === "roll") sizeRoll();
+    if (name === "roll") updateRollMode();
     dirty = true;
   }
   document.querySelectorAll(".studio-tab").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
-  window.addEventListener("resize", () => { if (tab === "roll") sizeRoll(); });
+  window.addEventListener("resize", () => { sizeProgress(); if (tab === "roll") { sizeRoll(); sizeLane(); } });
 
-  // ---------- export a WAV ----------
+  // ---------- the progress bar: time, bars, and a strip you can click or drag to jump ----------
+  const prog = $("studio-progress");
+  const progCanvas = $("studio-progress-canvas");
+  const progCtx = progCanvas.getContext("2d");
+  const PROG_H = 44;
+  let progDrag = false;
+
+  function sizeProgress() {
+    const w = Math.max(200, prog.clientWidth);
+    const dpr = window.devicePixelRatio || 1;
+    progCanvas.style.width = w + "px";
+    progCanvas.style.height = PROG_H + "px";
+    progCanvas.width = Math.round(w * dpr);
+    progCanvas.height = Math.round(PROG_H * dpr);
+    progCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    dirty = true;
+  }
+
+  const clockText = (seconds) => {
+    const s = Math.max(0, seconds);
+    return String(Math.floor(s / 60)).padStart(2, "0") + ":" + (s % 60).toFixed(1).padStart(4, "0");
+  };
+
+  function drawProgress() {
+    const w = Math.max(200, prog.clientWidth);
+    const light = document.documentElement.dataset.theme === "light";
+    const total = totalSteps();
+    const pos = playing || paused ? position() : 0;
+    const x = (pos / total) * (w - 2) + 1;
+    progCtx.clearRect(0, 0, w, PROG_H);
+    progCtx.fillStyle = light ? "rgba(80,10,12,0.08)" : "rgba(255,238,238,0.07)";
+    progCtx.fillRect(0, 14, w, PROG_H - 14);
+    progCtx.fillStyle = light ? "rgba(190,20,30,0.3)" : "rgba(255,59,59,0.3)";
+    progCtx.fillRect(0, 14, x, PROG_H - 14);
+    progCtx.font = "600 10px sans-serif";
+    progCtx.textBaseline = "top";
+    for (let s = 0; s < total; s += 4) {
+      const tx = (s / total) * (w - 2) + 1.5;
+      const barLine = s % STEPS === 0;
+      progCtx.strokeStyle = light ? "rgba(80,10,12,0.45)" : "rgba(255,238,238,0.4)";
+      progCtx.beginPath();
+      progCtx.moveTo(tx, barLine ? 3 : 20);
+      progCtx.lineTo(tx, PROG_H);
+      progCtx.stroke();
+      if (barLine && (total <= 64 || (s / STEPS) % 2 === 0)) {
+        progCtx.fillStyle = light ? "#5a1a1f" : "#cdbdbd";
+        progCtx.fillText(String(s / STEPS + 1), tx + 3, 2);
+      }
+    }
+    progCtx.fillStyle = "#ff3b3b";
+    progCtx.fillRect(x - 1, 8, 2, PROG_H - 8);
+    progCtx.beginPath();
+    progCtx.moveTo(x - 6, 6);
+    progCtx.lineTo(x + 6, 6);
+    progCtx.lineTo(x, 15);
+    progCtx.closePath();
+    progCtx.fill();
+    $("studio-time").textContent = clockText(pos * stepLength()) + " / " + clockText(total * stepLength());
+    $("studio-barpos").textContent = "Bar " + (Math.floor(pos / STEPS) + 1) + " · Beat " + (Math.floor((pos % STEPS) / 4) + 1);
+    prog.setAttribute("aria-valuenow", String(Math.round((pos / total) * 100)));
+  }
+
+  function progStep(event) {
+    const rect = prog.getBoundingClientRect();
+    return clamp(((event.clientX - rect.left) / rect.width) * totalSteps(), 0, totalSteps() - 1);
+  }
+  prog.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || learning) return;
+    prog.setPointerCapture(event.pointerId);
+    progDrag = true;
+    seek(progStep(event));
+  });
+  prog.addEventListener("pointermove", (event) => { if (progDrag) seek(progStep(event)); });
+  ["pointerup", "pointercancel"].forEach((n) => prog.addEventListener(n, () => { progDrag = false; }));
+  prog.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      event.stopPropagation();
+      seek(position() + (event.key === "ArrowRight" ? 1 : -1) * (event.shiftKey ? STEPS : 4));
+    }
+  });
+
+  // ---------- export a WAV (and a zip of stems) ----------
   function encodeWav(buffer) {
-    const channels = buffer.numberOfChannels;
+    const channelsCount = buffer.numberOfChannels;
     const frames = buffer.length;
-    const bytes = 44 + frames * channels * 2;
+    const bytes = 44 + frames * channelsCount * 2;
     const view = new DataView(new ArrayBuffer(bytes));
     const text = (offset, s) => { for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i)); };
     text(0, "RIFF");
@@ -953,18 +2370,18 @@
     text(12, "fmt ");
     view.setUint32(16, 16, true);
     view.setUint16(20, 1, true);
-    view.setUint16(22, channels, true);
+    view.setUint16(22, channelsCount, true);
     view.setUint32(24, buffer.sampleRate, true);
-    view.setUint32(28, buffer.sampleRate * channels * 2, true);
-    view.setUint16(32, channels * 2, true);
+    view.setUint32(28, buffer.sampleRate * channelsCount * 2, true);
+    view.setUint16(32, channelsCount * 2, true);
     view.setUint16(34, 16, true);
     text(36, "data");
-    view.setUint32(40, frames * channels * 2, true);
+    view.setUint32(40, frames * channelsCount * 2, true);
     const data = [];
-    for (let c = 0; c < channels; c++) data.push(buffer.getChannelData(c));
+    for (let c = 0; c < channelsCount; c++) data.push(buffer.getChannelData(c));
     let offset = 44;
     for (let i = 0; i < frames; i++) {
-      for (let c = 0; c < channels; c++) {
+      for (let c = 0; c < channelsCount; c++) {
         const s = Math.max(-1, Math.min(1, data[c][i]));
         view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
         offset += 2;
@@ -1031,20 +2448,27 @@
     return { numberOfChannels: out.length, length: to - from, sampleRate: rate, getChannelData: (c) => out[c] };
   }
 
+  // One pass through the whole song as it is set now (mixer, mutes, solos and effects included).
+  function renderSong() {
+    const sfx = S.sfx;
+    const total = totalSteps();
+    const repeats = sfx ? 1 : Math.max(1, Math.round(4 / S.bars)); // a loop is played to fill four bars
+    const sl = stepLength();
+    const fxOn = (key) => channels().some((id) => (S.mixer[id][key] || 0) > 0.01);
+    const tail = (sfx ? 3 : 1.5) + (fxOn("rev") ? 2 : 0) + (fxOn("del") ? 1.5 : 0); // a tail so the last notes and echoes can ring out
+    const seconds = total * repeats * sl + tail;
+    return renderBuffer(seconds, (ctx, out) => {
+      const e = buildEngine(ctx, out, false);
+      for (let s = 0; s < total * repeats; s++) scheduleStepInto(e, s % total, 0.05 + s * sl, sl);
+    });
+  }
+
   async function exportWav() {
     exportButton.disabled = true;
     exportNote.textContent = S.sfx ? "Rendering your sound effect…" : "Rendering your loop…";
     try {
       const sfx = S.sfx;
-      const total = totalSteps();
-      const repeats = sfx ? 1 : Math.max(1, Math.round(4 / S.bars)); // a loop is played to fill four bars
-      const sl = stepLength();
-      const tail = sfx ? 3 : 1.5;                         // a tail so the last notes can ring out
-      const seconds = total * repeats * sl + tail;
-      let rendered = await renderBuffer(seconds, (ctx, out) => {
-        const e = buildEngine(ctx, out, false);
-        for (let s = 0; s < total * repeats; s++) scheduleStepInto(e, s % total, 0.05 + s * sl, sl);
-      });
+      let rendered = await renderSong();
       if (sfx) rendered = finishSfx(rendered);
       const blob = encodeWav(rendered);
       const file = sfx ? "tcsmusic-sfx.wav" : "tcsmusic-loop.wav";
@@ -1056,6 +2480,96 @@
     exportButton.disabled = false;
   }
 
+  // a zip with no compression: each stem is a WAV, so there is little to squeeze anyway
+  const crcTable = (function () {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      t[n] = c >>> 0;
+    }
+    return t;
+  })();
+  function crc32(bytes) {
+    let c = 0xffffffff;
+    for (let i = 0; i < bytes.length; i++) c = crcTable[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  }
+  function makeZip(files) {
+    const enc = new TextEncoder();
+    const parts = [];
+    const central = [];
+    let offset = 0;
+    files.forEach((f) => {
+      const name = enc.encode(f.name);
+      const crc = crc32(f.bytes);
+      const local = new DataView(new ArrayBuffer(30));
+      local.setUint32(0, 0x04034b50, true);
+      local.setUint16(4, 20, true);
+      local.setUint16(6, 0x0800, true);
+      local.setUint16(10, 0, true);
+      local.setUint16(12, 0x0021, true);
+      local.setUint32(14, crc, true);
+      local.setUint32(18, f.bytes.length, true);
+      local.setUint32(22, f.bytes.length, true);
+      local.setUint16(26, name.length, true);
+      parts.push(local.buffer, name, f.bytes);
+      const cen = new DataView(new ArrayBuffer(46));
+      cen.setUint32(0, 0x02014b50, true);
+      cen.setUint16(4, 20, true);
+      cen.setUint16(6, 20, true);
+      cen.setUint16(8, 0x0800, true);
+      cen.setUint16(14, 0x0021, true);
+      cen.setUint32(16, crc, true);
+      cen.setUint32(20, f.bytes.length, true);
+      cen.setUint32(24, f.bytes.length, true);
+      cen.setUint16(28, name.length, true);
+      cen.setUint32(42, offset, true);
+      central.push(cen.buffer, name);
+      offset += 30 + name.length + f.bytes.length;
+    });
+    const size = central.reduce((n, p) => n + (p.byteLength !== undefined ? p.byteLength : p.length), 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true);
+    end.setUint16(8, files.length, true);
+    end.setUint16(10, files.length, true);
+    end.setUint32(12, size, true);
+    end.setUint32(16, offset, true);
+    return new Blob([...parts, ...central, end.buffer], { type: "application/zip" });
+  }
+
+  const hasContent = (t) => (t.type === "drums" ? TRACK_IDS.some((id) => t.pattern[id].some(Boolean))
+    : t.type === "audio" ? t.clips.length > 0 : t.type === "sampler" ? t.notes.length > 0 && !!t.sample : t.notes.length > 0);
+
+  // Every track on its own, lined up and the same length, ready to drop into other software.
+  async function exportStems() {
+    const wanted = S.tracks.filter((t) => hasContent(t) && !S.mixer[t.id].mute);
+    if (!wanted.length) { exportNote.textContent = "Nothing to export yet: add some notes, beats or clips first."; return; }
+    const stemsButton = $("studio-stems");
+    stemsButton.disabled = true;
+    const solos = {};
+    channels().forEach((id) => { solos[id] = S.mixer[id].solo; });
+    const files = [];
+    try {
+      for (let i = 0; i < wanted.length; i++) {
+        exportNote.textContent = "Rendering stem " + (i + 1) + " of " + wanted.length + "…";
+        channels().forEach((id) => { S.mixer[id].solo = false; });
+        S.mixer[wanted[i].id].solo = true;
+        const rendered = await renderSong();
+        const blob = encodeWav(rendered);
+        const slug = (wanted[i].builtin ? "drums" : wanted[i].name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "track";
+        files.push({ name: String(i + 1).padStart(2, "0") + "-" + slug + ".wav", bytes: new Uint8Array(await blob.arrayBuffer()) });
+      }
+      const zip = makeZip(files);
+      download(zip, "tcsmusic-stems.zip");
+      exportNote.textContent = "Saved tcsmusic-stems.zip: " + files.length + " stems, all the same length, so they line up (" + (zip.size / 1048576).toFixed(1) + " MB).";
+    } catch (error) {
+      exportNote.textContent = "Could not export the stems: " + error.message;
+    }
+    channels().forEach((id) => { S.mixer[id].solo = solos[id]; });
+    stemsButton.disabled = false;
+  }
+
   // ---------- the control targets: everything MIDI can drive ----------
   const targets = {};
   function target(id, label, group, kind, fn) { targets[id] = { id, label, group, kind, fn }; }
@@ -1065,18 +2579,26 @@
   target("stop", "Stop", "Transport", "trig", () => stop());
   target("record", "Record", "Transport", "trig", toggleRecord);
   target("tempo", "Tempo", "Transport", "cont", (v) => setBpm(60 + v * 240));
-  target("loop", "Loop length (1/2/4 bars)", "Transport", "trig", () => setBars(S.bars === 1 ? 2 : S.bars === 2 ? 4 : S.bars === 4 ? 8 : S.bars === 8 ? 16 : 1));
+  target("loop", "Loop length (1/2/4/8/16 bars)", "Transport", "trig", () => setBars(S.bars === 1 ? 2 : S.bars === 2 ? 4 : S.bars === 4 ? 8 : S.bars === 8 ? 16 : 1));
   target("clear", "Clear all", "Transport", "trig", () => clearAll());
+  target("undo", "Undo", "Transport", "trig", () => undo());
+  target("redo", "Redo", "Transport", "trig", () => redo());
   target("octave-up", "Keyboard octave up", "Keys", "trig", () => board.shiftOctave(1));
   target("octave-down", "Keyboard octave down", "Keys", "trig", () => board.shiftOctave(-1));
   target("master", "Master volume", "Mixer", "cont", (v) => setVol("master", v));
-  CHANNELS.forEach((id) => {
-    target("vol:" + id, NAME[id] + " volume", "Mixer", "cont", (v) => setVol(id, v));
-    target("pan:" + id, NAME[id] + " pan", "Mixer", "cont", (v) => setPan(id, v * 2 - 1));
-    target("mute:" + id, NAME[id] + " mute", "Mixer", "trig", () => toggleMute(id));
-    target("solo:" + id, NAME[id] + " solo", "Mixer", "trig", () => toggleSolo(id));
-  });
   for (let i = 0; i < 16; i++) target("pad:" + i, "Pad " + (i + 1), "Pads", "trig", (v) => hitPad(i, v === undefined ? 0.85 : v));
+
+  // faders, pans, mutes and solos exist for every drum voice and every track, and change as tracks come and go
+  function registerTargets() {
+    Object.keys(targets).forEach((id) => { if (/^(vol|pan|mute|solo):/.test(id)) delete targets[id]; });
+    channels().forEach((id) => {
+      const n = nameOf(id);
+      target("vol:" + id, n + " volume", "Mixer", "cont", (v) => setVol(id, v));
+      target("pan:" + id, n + " pan", "Mixer", "cont", (v) => setPan(id, v * 2 - 1));
+      target("mute:" + id, n + " mute", "Mixer", "trig", () => toggleMute(id));
+      target("solo:" + id, n + " solo", "Mixer", "trig", () => toggleSolo(id));
+    });
+  }
 
   function drive(id, value) {
     const t = targets[id];
@@ -1097,7 +2619,7 @@
   try {
     const saved = JSON.parse(localStorage.getItem(MAP_KEY) || "null");
     if (saved && typeof saved === "object") {
-      Object.keys(saved).forEach((key) => { if (targets[saved[key]]) map[key] = saved[key]; });
+      Object.keys(saved).forEach((key) => { if (typeof saved[key] === "string") map[key] = saved[key]; });
     }
   } catch (error) { /* keep empty */ }
   const saveMap = () => { try { localStorage.setItem(MAP_KEY, JSON.stringify(map)); } catch (error) { /* fine */ } };
@@ -1133,7 +2655,7 @@
       o.textContent = t.label;
       groups[t.group].appendChild(o);
     });
-    select.value = map[key] || "";
+    select.value = map[key] && targets[map[key]] ? map[key] : "";
     select.addEventListener("change", () => bind(key, select.value));
     return select;
   }
@@ -1141,7 +2663,7 @@
   function bind(key, id) {
     Object.keys(map).forEach((k) => { if (id && map[k] === id && k !== key) delete map[k]; });
     if (id) map[key] = id; else delete map[key];
-    seen.forEach((row, k) => { row.select.value = map[k] || ""; });
+    seen.forEach((row, k) => { row.select.value = map[k] && targets[map[k]] ? map[k] : ""; });
     saveMap();
   }
 
@@ -1219,7 +2741,7 @@
       if (m.type === "cc" && m.value === lastValue[m.key]) return;
       bind(m.key, learnTarget);
       if (!seen.has(m.key)) showSeen({ ...m, ch: 10 });
-      learnNote.textContent = "Linked " + describe(m) + " → " + targets[learnTarget].label + ". Click another control to keep going.";
+      learnNote.textContent = "Linked " + describe(m) + " → " + (targets[learnTarget] ? targets[learnTarget].label : learnTarget) + ". Click another control to keep going.";
       document.querySelectorAll(".is-learning").forEach((el) => el.classList.remove("is-learning"));
       learnTarget = null;
       lastValue[m.key] = m.value;
@@ -1229,7 +2751,7 @@
     const id = map[m.key];
     const prev = lastValue[m.key] === undefined ? 0 : lastValue[m.key];
     lastValue[m.key] = m.value;
-    if (id) {
+    if (id && targets[id]) {
       const t = targets[id];
       if (m.type === "noteoff") return;
       if (t.kind === "cont") t.fn(m.value);
@@ -1260,13 +2782,14 @@
 
   const midiButton = $("studio-midi-connect");
   const midiStatus = $("studio-midi-status");
+  let wasConnected = false;
   Hub.onState((s) => {
     midiButton.setAttribute("aria-pressed", String(s.connected));
     midiButton.textContent = s.connected ? "🎹 Disconnect MIDI" : "🎹 Connect MIDI";
     midiStatus.textContent = s.message || (s.connected
       ? (s.devices.length ? "Connected: " + s.devices.join(", ") : "No MIDI keyboard found. Plug one in.")
       : "Not connected");
-    if (!s.connected) {
+    if (!s.connected && wasConnected) {
       K.setPitchBend(0);
       K.setVibrato(0);
       K.setTone(1);
@@ -1275,17 +2798,25 @@
       modFill.style.width = "0%";
       for (let n = 21; n <= 108; n++) board.up(n);
     }
+    wasConnected = s.connected;
   });
   midiButton.addEventListener("click", () => {
-    midiStatus.textContent = "Waiting for permission…";
+    if (!Hub.status().connected) midiStatus.textContent = "Waiting for permission…";
     Hub.toggle();
   });
 
   // ---------- buttons ----------
   function clearAll() {
-    TRACK_IDS.forEach((id) => S.pattern[id].fill(false));
-    S.notes = [];
+    S.tracks.forEach((t) => {
+      if (t.pattern) TRACK_IDS.forEach((id) => t.pattern[id].fill(false));
+      t.notes = [];
+      t.pedal = [];
+      t.clips = [];
+    });
+    killSources();
     select(null);
+    audioSel = null;
+    refreshTrackLabels();
     paint();
     dirty = true;
     save();
@@ -1296,11 +2827,12 @@
     const stepButton = event.target.closest(".studio-grid-step");
     if (stepButton) {
       const id = stepButton.dataset.track;
-      const step = Number(stepButton.dataset.step);
-      S.pattern[id][step] = !S.pattern[id][step];
-      if (S.pattern[id][step] && !playing) {
+      const at = Number(stepButton.dataset.step);
+      const owner = drumTrack();
+      owner.pattern[id][at] = !owner.pattern[id][at];
+      if (owner.pattern[id][at] && !playing) {
         const e = engine();
-        hitDrum(e, id, e.ctx.currentTime, 1);
+        hitDrum(e, id, e.ctx.currentTime, 1, owner.builtin ? null : owner.id);
       }
       paint();
       save();
@@ -1313,19 +2845,30 @@
   playButton.addEventListener("click", () => { if (!learning) playPause(); });
   stopButton.addEventListener("click", () => { if (!learning) stop(); });
   recordButton.addEventListener("click", () => { if (!learning) toggleRecord(); });
-  bpmInput.addEventListener("input", () => { bpmValue.textContent = bpmInput.value; save(); });
+  bpmInput.addEventListener("input", () => { bpmValue.textContent = bpmInput.value; if (live) applyMixer(live); drawProgress(); save(); });
   barsSelect.addEventListener("change", () => setBars(Number(barsSelect.value)));
   clearButton.addEventListener("click", clearAll);
   exportButton.addEventListener("click", exportWav);
+  $("studio-stems").addEventListener("click", exportStems);
+  $("studio-undo").addEventListener("click", undo);
+  $("studio-redo").addEventListener("click", redo);
   const sfxBox = $("studio-sfx-mode");
   sfxBox.addEventListener("change", () => { S.sfx = sfxBox.checked; save(); });
+  const metroButton = $("studio-metro");
+  function setMetro(on) {
+    S.metro = on;
+    metroButton.setAttribute("aria-pressed", String(on));
+    save();
+  }
+  metroButton.addEventListener("click", () => setMetro(!S.metro));
 
   presetSelect.addEventListener("change", () => {
     const preset = PRESETS[presetSelect.value];
     if (!preset) return;
+    const pattern = drumTrack().pattern;
     TRACK_IDS.forEach((id) => {
       const row = preset[id] || "";
-      for (let i = 0; i < STEPS; i++) S.pattern[id][i] = row.charAt(i) === "x";
+      for (let i = 0; i < STEPS; i++) pattern[id][i] = row.charAt(i) === "x";
     });
     presetSelect.value = "";
     paint();
@@ -1346,7 +2889,11 @@
         showStep(s.step);
       }
     }
-    if (tab === "roll" && (dirty || playing)) { drawRoll(); dirty = false; }
+    if (dirty || playing) {
+      drawProgress();
+      if (tab === "roll") { if ((activeTrack() || {}).type === "audio") drawLane(); else drawRoll(); }
+      dirty = false;
+    }
     if (tab === "mix") drawMeters();
     frameId = requestAnimationFrame(frame);
   }
@@ -1355,29 +2902,52 @@
   // Space is the play key here, as in most music software. (The sustain pedal still works from the
   // on-screen buttons, Shift and a MIDI pedal.)
   function nudge(semitones, steps) {
-    if (!sel) return;
-    const next = Math.max(21, Math.min(108, sel.midi + semitones));
-    if (next !== sel.midi) { sel.midi = next; preview(next); }
-    sel.start = Math.max(0, Math.min(totalSteps() - sel.len, sel.start + steps));
-    select(sel);
+    const ns = [...selSet];
+    if (!ns.length) return;
+    if (ns.some((n) => n.midi + semitones < 21 || n.midi + semitones > 108)) semitones = 0;
+    const from = Math.min(...ns.map((n) => n.start));
+    const to = Math.max(...ns.map((n) => n.start + n.len));
+    const ds = clamp(steps, -from, totalSteps() - to);
+    ns.forEach((n) => { n.midi += semitones; n.start += ds; });
+    if (semitones && sel) preview(sel.midi);
+    syncEditor();
     save();
   }
 
   function duplicateNote() {
-    if (!sel || sel.start + sel.len * 2 > totalSteps()) return;
-    const copy = { ...sel, start: sel.start + sel.len };
-    S.notes.push(copy);
-    select(copy);
+    const ns = [...selSet];
+    const trk = noteTrack();
+    if (!ns.length || !trk) return;
+    const from = Math.min(...ns.map((n) => n.start));
+    const to = Math.max(...ns.map((n) => n.start + n.len));
+    if (to + (to - from) > totalSteps()) return;
+    const copies = ns.map((n) => ({ ...n, start: n.start + (to - from) }));
+    trk.notes.push(...copies);
+    selectMany(copies);
     save();
   }
 
   const typing = (el) => /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName) || el.isContentEditable;
-  const SHORTCUT_KEYS = new Set([" ", "Enter", "Escape", "r", "e", "1", "2", "3", "[", "]", "{", "}", "?", "/", "d", "h",
+  const SHORTCUT_KEYS = new Set([" ", "Enter", "Escape", "r", "e", "m", "v", "b", "q", "1", "2", "3", "[", "]", "{", "}", "?", "/", "d", "h",
     "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown"]);
 
   window.addEventListener("keydown", (event) => {
-    if (event.ctrlKey || event.metaKey || event.altKey || event.repeat && event.key !== "ArrowUp" && event.key !== "ArrowDown" && event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     if (typing(event.target) || learning) return;
+    if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+      const key = event.key.toLowerCase();
+      const inRollTab = tab === "roll";
+      let handled = true;
+      if (key === "z") { if (event.shiftKey) redo(); else undo(); }
+      else if (key === "y") redo();
+      else if (inRollTab && key === "a") selectAll();
+      else if (inRollTab && key === "c") copyNotes(false);
+      else if (inRollTab && key === "x") copyNotes(true);
+      else if (inRollTab && key === "v") pasteNotes();
+      else handled = false;
+      if (handled) { event.preventDefault(); event.stopPropagation(); }
+      return;
+    }
+    if (event.altKey || (event.repeat && !["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key))) return;
     const k = event.key.length === 1 ? event.key.toLowerCase() : event.key;
     if (!SHORTCUT_KEYS.has(k)) return;
     const inRoll = tab === "roll";
@@ -1387,11 +2957,15 @@
     else if (k === "Escape") stop();
     else if (k === "r") toggleRecord();
     else if (k === "e") exportButton.click();
+    else if (k === "m") setMetro(!S.metro);
     else if (k === "1") showTab("seq");
     else if (k === "2") showTab("roll");
     else if (k === "3") showTab("mix");
     else if (k === "[" || k === "]" || k === "{" || k === "}") setBpm(Number(bpmInput.value) + ((k === "]" || k === "}") ? 1 : -1) * (event.shiftKey || k === "{" || k === "}" ? 10 : 1));
     else if (k === "?" || k === "/") { const d = $("studio-shortcuts"); d.open = !d.open; }
+    else if (inRoll && k === "v") setTool("select");
+    else if (inRoll && k === "b") setTool("draw");
+    else if (inRoll && k === "q") quantizeNotes();
     else if (inRoll && k === "d") { if (sel) duplicateNote(); else done = false; }
     else if (inRoll && k === "h") { if (sel) $("studio-note-hear").click(); else done = false; }
     else if (inRoll && k === "PageUp") rollShift(12);
@@ -1409,26 +2983,70 @@
     if (event.key === " " && !typing(event.target) && !learning) { event.preventDefault(); event.stopPropagation(); }
   }, true);
 
+  // ---------- put every control in step with the data ----------
+  const sfxCheck = sfxBox;
+  function rebuildUi() {
+    renderTracks();
+    renderMixer();
+    registerTargets();
+    renderSettings();
+    padEls.forEach((p, i) => { p.select.value = S.pads[i]; });
+    bpmValue.textContent = bpmInput.value;
+    barsSelect.value = String(S.bars);
+    sfxCheck.checked = S.sfx;
+    metroButton.setAttribute("aria-pressed", String(S.metro));
+    scaleKey.value = String(S.scale.root);
+    scaleMode.value = S.scale.show && SCALES[S.scale.name] ? S.scale.name : "Off";
+    $("studio-snap").value = String(S.snap);
+    setTool(S.tool);
+    paint();
+    select(null);
+    audioSel = null;
+    const nt = noteTrack();
+    if (nt && nt.type !== "sampler") { K.setInstrument(nt.inst); instSelect.value = nt.inst; }
+    if (live) { ensureChannels(live); applyMixer(live); }
+    sizeProgress();
+    sizeRoll();
+    sizeLane();
+    updateRollMode();
+    syncClipboardButtons();
+    syncHistoryButtons();
+    dirty = true;
+  }
+
   load();
-  padEls.forEach((p, i) => { p.select.value = S.pads[i]; });
-  bpmValue.textContent = bpmInput.value;
-  barsSelect.value = String(S.bars);
-  sfxBox.checked = S.sfx;
-  scaleKey.value = String(S.scale.root);
-  scaleMode.value = S.scale.show ? S.scale.name : "Off";
-  $("studio-snap").value = String(S.snap);
-  paint();
-  CHANNELS.forEach(syncMixerUi);
-  syncMixerUi("master");
-  sizeRoll();
+  rebuildUi();
+  hist.stack = [JSON.stringify(serialize())];
+  hist.idx = 0;
+  syncHistoryButtons();
+
+  // the Scales page sends you here with ?scale=Dorian&key=2 to shade a scale on the roll
+  (function fromScalesPage() {
+    try {
+      const q = new URLSearchParams(location.search);
+      const name = q.get("scale");
+      if (!name || !SCALES[name]) return;
+      const root = clamp(Number(q.get("key")) || 0, 0, 11) | 0;
+      scaleKey.value = String(root);
+      scaleMode.value = name;
+      applyScale();
+      showTab("roll");
+    } catch (error) { /* no query: nothing to do */ }
+  })();
+
   frameId = requestAnimationFrame(frame);
 
   // tests drive the page through this
   window.StudioApi = {
     S, K, HUES, engine, renderBuffer, encodeWav, download, noiseHit, tone, VOICES, hitDrum, playKey,
-    setBpm, setBars, paint, save, sizeRoll, showTab, TRACK_IDS, select, finishSfx, noteOpts,
+    setBpm, setBars, paint, save, sizeRoll, showTab, TRACK_IDS, select, selectMany, finishSfx, noteOpts,
     redraw: () => { dirty = true; },
     stepLength, totalSteps,
+    addTrack, removeTrack, setActive, undo, redo, seek, newTrack, activeTrack, noteTrack, drumTrack,
+    renderSong, makeZip, crc32, storeAudio, audio, copyNotes, pasteNotes, quantizeNotes, transposeNotes, legatoNotes,
+    humanizeNotes, selectAll, pedalHold, exportStems, setTrackInst, applyState, serialize, scheduleStepInto, buildEngine,
+    get selSet() { return selSet; }, get hist() { return hist; }, get clipboard() { return clipboard; },
+    playClip, playSample, startMic, importAudioFiles,
   };
   window.StudioDebug = { S, targets, drive, getMap: () => map, position, get playing() { return playing; }, get paused() { return paused; } };
 })();

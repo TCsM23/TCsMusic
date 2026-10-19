@@ -1,16 +1,20 @@
-// MidiHub: owns the Web MIDI connection and turns raw bytes into plain messages.
+// MidiHub: the one place on every page that owns the Web MIDI connection.
+// It turns raw bytes into plain messages, and it remembers that you were connected, so the next
+// page you open reconnects by itself (no button, no permission prompt once the browser has allowed it).
 // Anything on the page can listen:  MidiHub.on(function (msg) { ... })
 // msg = { type, ch (1-16), a, b, value (0-1), key }  where key names the physical control,
 // like "cc:1:21" (channel 1, controller 21) or "note:10:36" (channel 10, note 36).
 (function () {
   "use strict";
+  if (window.MidiHub) return; // loaded twice: keep the first one
+  const PREF_KEY = "tcsmusic-midi-on";
   let access = null;
   let busy = false;
+  let message = "";
   const listeners = [];
   const stateListeners = [];
 
   function emit(msg) { listeners.forEach((fn) => fn(msg)); }
-  function emitState() { stateListeners.forEach((fn) => fn(status())); }
 
   function parse(data) {
     const status = data[0], a = data[1] || 0, b = data[2] || 0;
@@ -45,40 +49,50 @@
   }
 
   function status() {
-    return { connected: !!access, busy, devices: names(), message: "" };
+    return { connected: !!access, busy, devices: names(), message };
   }
 
-  async function connect() {
+  function emitState() { const s = status(); stateListeners.forEach((fn) => fn(s)); }
+
+  function remember(on) {
+    try { localStorage.setItem(PREF_KEY, on ? "on" : "off"); } catch (error) { /* private window */ }
+  }
+
+  async function connect(quiet) {
     if (access || busy) return status();
     if (!navigator.requestMIDIAccess) {
-      const s = status();
-      s.message = "This browser has no MIDI support. Try Chrome, Edge or Opera.";
-      stateListeners.forEach((fn) => fn(s));
-      return s;
+      message = "This browser has no MIDI support. Try Chrome, Edge or Opera.";
+      emitState();
+      return status();
     }
     busy = true;
+    message = quiet ? "Reconnecting your MIDI keyboard…" : "Waiting for permission…";
+    emitState();
     try {
       access = await navigator.requestMIDIAccess();
     } catch (error) {
       access = null;
       busy = false;
-      const s = status();
-      s.message = "MIDI access was blocked. Allow it in the address bar and try again.";
-      stateListeners.forEach((fn) => fn(s));
-      return s;
+      message = "MIDI access was blocked. Allow it in the address bar and try again.";
+      emitState();
+      return status();
     }
     busy = false;
+    message = "";
     listen();
     access.onstatechange = () => { listen(); emitState(); };
+    remember(true);
     emitState();
     return status();
   }
 
-  function disconnect() {
+  function disconnect(keepPreference) {
     if (!access) return;
     access.inputs.forEach((input) => { input.onmidimessage = null; });
     access.onstatechange = null;
     access = null;
+    message = "";
+    if (!keepPreference) remember(false);
     emitState();
   }
 
@@ -86,9 +100,27 @@
     connect, disconnect, status,
     toggle() { return access ? (disconnect(), Promise.resolve(status())) : connect(); },
     on(fn) { listeners.push(fn); },
-    onState(fn) { stateListeners.push(fn); },
+    // a late listener hears the current state straight away, so every page's button starts in the right place
+    onState(fn) { stateListeners.push(fn); fn(status()); },
     // for tests and for pretend controllers
     inject(msg) { emit(msg); },
     parse,
   };
+
+  // Connected on the last page? Connect again here. Only when the browser has already allowed MIDI,
+  // so nobody gets a surprise permission prompt just for opening a page.
+  (async function reconnect() {
+    let wanted = false;
+    try { wanted = localStorage.getItem(PREF_KEY) === "on"; } catch (error) { /* nothing saved */ }
+    if (!wanted || !navigator.requestMIDIAccess) return;
+    try {
+      if (navigator.permissions && navigator.permissions.query) {
+        const permission = await navigator.permissions.query({ name: "midi" });
+        if (permission.state !== "granted") return;
+      } else {
+        return;
+      }
+    } catch (error) { return; }
+    connect(true);
+  })();
 })();

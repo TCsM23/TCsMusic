@@ -10,6 +10,7 @@ urlpatterns = [
     path("learn/", views.learn, name="learn"),          
     path("practice/", views.practice, name="practice"),   
     path("notation/", views.notation_page, name="notation"), 
+    path("scales/", views.scales, name="scales"),
     path("songs/", views.songs, name="songs"),
     path("studio/", views.studio, name="studio"),
     path("about/", views.about, name="about"),

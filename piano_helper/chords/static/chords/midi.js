@@ -15,8 +15,8 @@
   const FUNCTIONS = { none: "Nothing", volume: "Volume", vibrato: "Vibrato", tone: "Brightness" };
   const NAMES = { 1: "Mod wheel", 7: "Volume", 11: "Expression", 74: "Brightness" };
 
-  let access = null;
-  let connecting = false;
+  const Hub = window.MidiHub;
+  if (!Hub) return;
   const sounding = new Set(); // notes the keyboard is holding down
   const rows = new Map();     // controller number -> its row on the page
   let map = { 1: "vibrato", 7: "volume", 74: "tone" }; // which controller drives which sound control
@@ -39,17 +39,6 @@
 
   function say(text) {
     statusOut.textContent = text;
-  }
-
-  function inputNames() {
-    const names = [];
-    access.inputs.forEach((input) => names.push(input.name || "MIDI device"));
-    return names;
-  }
-
-  function showDevices() {
-    const names = inputNames();
-    say(names.length ? "Connected: " + names.join(", ") : "No MIDI keyboard found. Plug one in.");
   }
 
   // ---------- notes ----------
@@ -142,71 +131,38 @@
     rows.clear();
   }
 
-  // ---------- messages ----------
-  function onMessage(event) {
-    const [status, a, b] = event.data;
-    const kind = status & 0xf0;
-    if (kind === 0x90 && b > 0) noteOn(a, b);
-    else if (kind === 0x80 || (kind === 0x90 && b === 0)) noteOff(a);
-    else if (kind === 0xe0) pitchWheel(a, b);
-    else if (kind === 0xb0 && a === 64) sustain(b);
-    else if (kind === 0xb0 && (a === 123 || a === 120)) allOff();
-    else if (kind === 0xb0) controller(a, b);
+  // ---------- messages (they come from the one shared MidiHub, on every page) ----------
+  function onMessage(m) {
+    if (m.type === "noteon") noteOn(m.a, m.b);
+    else if (m.type === "noteoff") noteOff(m.a);
+    else if (m.type === "bend") pitchWheel(m.a, m.b);
+    else if (m.type === "cc" && m.a === 64) sustain(m.b);
+    else if (m.type === "cc" && (m.a === 123 || m.a === 120)) allOff();
+    else if (m.type === "cc") controller(m.a, m.b);
   }
-
-  function listen() {
-    access.inputs.forEach((input) => {
-      input.onmidimessage = onMessage;
-    });
-  }
+  Hub.on(onMessage);
 
   // ---------- connect and disconnect ----------
-  async function connect() {
-    if (!navigator.requestMIDIAccess) {
-      say("This browser has no MIDI support. Try Chrome, Edge or Opera.");
-      return;
+  let wasConnected = false;
+  Hub.onState((s) => {
+    connectButton.setAttribute("aria-pressed", String(s.connected));
+    connectButton.textContent = s.connected ? "🎹 Disconnect MIDI" : "🎹 Connect MIDI";
+    if (s.connected) {
+      say(s.devices.length ? "Connected: " + s.devices.join(", ") : "No MIDI keyboard found. Plug one in.");
+      controlsNote.textContent = "move a wheel, fader, knob or pad";
+    } else {
+      say(s.message || "Not connected");
+      if (wasConnected) {
+        allOff();
+        resetControls();
+        controlsNote.textContent = "connect a MIDI keyboard to see them";
+      }
     }
-    say("Waiting for permission…");
-    try {
-      access = await navigator.requestMIDIAccess();
-    } catch (error) {
-      access = null;
-      say("MIDI access was blocked. Allow it in the address bar and try again.");
-      return;
-    }
-    listen();
-    showDevices();
-    controlsNote.textContent = "move a wheel, fader, knob or pad";
-    connectButton.textContent = "🎹 Disconnect MIDI";
-    connectButton.setAttribute("aria-pressed", "true");
-    access.onstatechange = () => {
-      listen();
-      showDevices();
-    };
-  }
+    wasConnected = s.connected;
+  });
 
-  function disconnect() {
-    allOff();
-    access.inputs.forEach((input) => {
-      input.onmidimessage = null;
-    });
-    access.onstatechange = null;
-    access = null;
-    resetControls();
-    controlsNote.textContent = "connect a MIDI keyboard to see them";
-    connectButton.textContent = "🎹 Connect MIDI";
-    connectButton.setAttribute("aria-pressed", "false");
-    say("Not connected");
-  }
-
-  connectButton.addEventListener("click", async () => {
-    if (connecting) return;
-    if (access) {
-      disconnect();
-      return;
-    }
-    connecting = true;
-    await connect();
-    connecting = false;
+  connectButton.addEventListener("click", () => {
+    if (!Hub.status().connected) say("Waiting for permission…");
+    Hub.toggle();
   });
 })();

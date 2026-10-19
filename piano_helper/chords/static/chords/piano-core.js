@@ -133,6 +133,11 @@ window.PianoKit = (function () {
     // Filtered noise whose centre pitch follows the note, so a Slide makes a whoosh or a sigh.
     noise:     { name: "Noise Sweep", noise: true, q: 3.5, partials: [["noise", 1, 1]], attack: 0.01, sustain: 1, trim: 2.2 },
     // A struck metal plate: inharmonic partials that ring for seconds.
+    // ---- played instruments for the bass and guitar tracks ----
+    // Bass: a sub sine under a filtered saw. Guitar: a plucked string (Karplus-Strong) with no samples at all.
+    bass:      { name: "Bass", partials: [["sine", 1, 1], ["sawtooth", 1, 0.34], ["sawtooth", 1.004, 0.3]], attack: 0.01, sustain: 0.8, cutoff: 650, trim: 1.1 },
+    guitar:    { name: "Nylon Guitar", partials: [["ks", 1, 1]], ks: 0.38, loss: 0.9992, hold: true, attack: 0.002, trim: 1.5 },
+    eguitar:   { name: "Electric Guitar", partials: [["ks", 1, 1]], ks: 0.75, loss: 0.9996, hold: true, drive: 9, cutoff: 3600, attack: 0.002, trim: 0.7 },
     gong:      { name: "Gong", partials: [["sine", 1, 1], ["sine", 1.007, 0.6], ["sine", 1.47, 0.8], ["sine", 1.48, 0.45], ["sine", 2.09, 0.6], ["sine", 2.1, 0.35], ["sine", 2.56, 0.5], ["sine", 3.33, 0.35], ["sine", 4.2, 0.3]], attack: 0.003, life: 4.5, trim: 0.55 },
   };
   let instrument = "piano";
@@ -167,6 +172,7 @@ window.PianoKit = (function () {
     const freq = midiToFreq(midi) * (inst.octave || 1);
     const low = inst.lowBoost ? Math.min(1, Math.max(0, (60 - midi) / 24)) : 0;
     const end = start + duration;
+    const rel = opts ? Math.max(0, Math.min(6, Number(opts.release) || 0)) : 0; // extra ring-out after the note ends
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.0001, start);
     gain.gain.exponentialRampToValueAtTime(peak, start + inst.attack);
@@ -174,9 +180,12 @@ window.PianoKit = (function () {
       const level = peak * inst.sustain;
       gain.gain.exponentialRampToValueAtTime(level, start + inst.attack + 0.05);
       gain.gain.setValueAtTime(level, Math.max(start + inst.attack + 0.05, end - 0.1));
-      gain.gain.exponentialRampToValueAtTime(0.0001, end + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.0001, end + 0.05 + rel);
+    } else if (inst.hold) {
+      gain.gain.setValueAtTime(peak, Math.max(start + inst.attack, end - 0.02));
+      gain.gain.exponentialRampToValueAtTime(0.0001, end + 0.14 + rel);
     } else {
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + Math.min(duration + 0.25, inst.life));
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + Math.min(duration + 0.25 + rel, inst.life));
     }
     const glide = opts && Number(opts.glide) ? Number(opts.glide) : 0;
     const fi = opts ? Math.max(0, Math.min(1, Number(opts.fadeIn) || 0)) : 0;
@@ -206,11 +215,29 @@ window.PianoKit = (function () {
       filter.connect(gain);
       sink = filter;
     }
+    if (inst.drive) {
+      const shaper = ctx.createWaveShaper();
+      shaper.curve = driveCurve(inst.drive);
+      shaper.oversample = "2x";
+      shaper.connect(sink);
+      sink = shaper;
+    }
     inst.partials.forEach(([type, multiple, level, decayK], index) => {
       let amount = level;
       if (index === 2) amount += 0.54 * low;
       if (index === 3) amount += 0.4 * low;
       const part = ctx.createGain();
+      if (type === "ks") {
+        const src = ctx.createBufferSource();
+        src.buffer = pluckBuffer(ctx, midi, duration + rel + 0.3, inst.ks, inst.loss);
+        slide(src.playbackRate, 1);
+        part.gain.setValueAtTime(amount, start);
+        src.connect(part);
+        part.connect(sink);
+        src.start(start);
+        src.stop(end + 0.4 + rel);
+        return;
+      }
       if (inst.noise) {
         const src = ctx.createBufferSource();
         src.buffer = noiseFor(ctx);
@@ -224,7 +251,7 @@ window.PianoKit = (function () {
         band.connect(part);
         part.connect(sink);
         src.start(start, Math.random());
-        src.stop(end + 0.35);
+        src.stop(end + 0.35 + rel);
         return;
       }
       const osc = ctx.createOscillator();
@@ -235,8 +262,51 @@ window.PianoKit = (function () {
       osc.connect(part);
       part.connect(sink);
       osc.start(start);
-      osc.stop(end + 0.35);
+      osc.stop(end + 0.35 + rel);
     });
+  }
+
+  // A plucked string: noise in a short loop that loses a little energy each time round. It is worked out
+  // as a buffer, because a delay loop made from Web Audio nodes cannot reach high pitches.
+  const pluckCache = new Map();
+  function pluckBuffer(ctx, midi, seconds, bright, loss) {
+    const rate = ctx.sampleRate;
+    const len = Math.ceil(rate * Math.min(6, Math.max(0.4, Math.ceil(seconds * 4) / 4)));
+    const key = rate + ":" + midi + ":" + len + ":" + bright + ":" + loss;
+    if (pluckCache.has(key)) return pluckCache.get(key);
+    const period = Math.max(2, Math.round(rate / midiToFreq(midi)));
+    const ring = new Float32Array(period);
+    let seed = (midi * 7919 + 13) >>> 0;
+    const rand = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 2147483648 - 1; };
+    let soft = 0;
+    for (let i = 0; i < period; i++) { soft += bright * (rand() - soft); ring[i] = soft; }
+    const buffer = ctx.createBuffer(1, len, rate);
+    const out = buffer.getChannelData(0);
+    for (let i = 0; i < len; i++) {
+      const at = i % period;
+      const v = ring[at];
+      out[i] = v;
+      ring[at] = loss * 0.5 * (v + ring[(at + 1) % period]);
+    }
+    let peak = 0;
+    for (let i = 0; i < len; i++) peak = Math.max(peak, Math.abs(out[i]));
+    if (peak > 0) for (let i = 0; i < len; i++) out[i] /= peak;
+    if (pluckCache.size > 160) pluckCache.delete(pluckCache.keys().next().value);
+    pluckCache.set(key, buffer);
+    return buffer;
+  }
+
+  const driveCurves = new Map();
+  function driveCurve(amount) {
+    if (!driveCurves.has(amount)) {
+      const curve = new Float32Array(1024);
+      for (let i = 0; i < curve.length; i++) {
+        const x = (i / (curve.length - 1)) * 2 - 1;
+        curve[i] = Math.tanh(amount * x) / Math.tanh(amount);
+      }
+      driveCurves.set(amount, curve);
+    }
+    return driveCurves.get(amount);
   }
 
   function getMix() {
@@ -268,6 +338,9 @@ window.PianoKit = (function () {
       gain.gain.exponentialRampToValueAtTime(level, Math.max(settle, start + inst.attack + 0.01));
       gain.gain.setValueAtTime(level, Math.max(settle, end - 0.12));
       gain.gain.exponentialRampToValueAtTime(0.0001, end);
+    } else if (inst.hold) {
+      gain.gain.setValueAtTime(peak, Math.max(start + inst.attack, end - 0.3));
+      gain.gain.exponentialRampToValueAtTime(0.0001, end);
     } else {
       gain.gain.exponentialRampToValueAtTime(0.0001, start + Math.min(duration, inst.life));
     }
@@ -285,6 +358,13 @@ window.PianoKit = (function () {
       filter.connect(gain);
       sink = filter;
     }
+    if (inst.drive) {
+      const shaper = ctx.createWaveShaper();
+      shaper.curve = driveCurve(inst.drive);
+      shaper.oversample = "2x";
+      shaper.connect(sink);
+      sink = shaper;
+    }
 
     const oscs = [];
     inst.partials.forEach(([type, multiple, level, decayK], index) => {
@@ -294,7 +374,10 @@ window.PianoKit = (function () {
       const part = ctx.createGain();
       let osc;
       let entry = part;
-      if (inst.noise) {
+      if (type === "ks") {
+        osc = ctx.createBufferSource();
+        osc.buffer = pluckBuffer(ctx, midi, Math.min(6, duration), inst.ks, inst.loss);
+      } else if (inst.noise) {
         osc = ctx.createBufferSource();
         osc.buffer = noiseFor(ctx);
         osc.loop = true;
@@ -308,6 +391,7 @@ window.PianoKit = (function () {
         osc.type = type;
         osc.frequency.value = freq * multiple;
       }
+      if (type === "ks") osc.playbackRate.value = 1;
       osc.detune.value = bendCents;
       vibrato.connect(osc.detune);
       liveOscs.add(osc);
@@ -469,6 +553,8 @@ window.PianoKit = (function () {
   const PIANO_HIGH = 108;
 
   function createKeyboard(keysEl, caseEl, startLow = 48, startHigh = 84, options = {}) {
+    // one keyboard per page: sections that share a page (Learn, Practice) all get the same one
+    if (keysEl.__tcsBoard) return keysEl.__tcsBoard;
     let low = startLow;
     let high = startHigh;
     const mini = options.mini === true; // the small floating copy
@@ -548,7 +634,14 @@ window.PianoKit = (function () {
       for (let midi = low; midi <= high; midi++) {
         const key = document.createElement("div");
         key.dataset.midi = midi;
-        if (midi % 12 === 0) key.dataset.c = "C" + (midi / 12 - 1); // C3, C4... shows which octave is on screen
+        if (midi % 12 === 0) {
+          // C3, C4... shows which octave is on screen. A real element (not ::after), because a picked key needs ::after for its dot
+          key.dataset.c = "C" + (midi / 12 - 1);
+          const tag = document.createElement("span");
+          tag.className = "main-keyboard-octave";
+          tag.textContent = key.dataset.c;
+          key.appendChild(tag);
+        }
         if (BLACK_PCS.includes(midi % 12)) {
           key.className = "main-keyboard-key main-keyboard-key-black";
         } else {
@@ -847,6 +940,7 @@ window.PianoKit = (function () {
     if (clearButton) clearButton.addEventListener("click", () => light([]));
     keyboards.push(board);
     if (!mini) mainBoard = board;
+    keysEl.__tcsBoard = board;
     return board;
   }
 

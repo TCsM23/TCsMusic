@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from django.http import JsonResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.templatetags.static import static
 from django.views.decorators.http import require_GET
 
@@ -10,7 +10,7 @@ from .theory import (
     TheoryError, SHARP_NAMES, CHORD_QUALITIES,
 )
 
-from . import lessons, notation
+from . import lessons, notation, scale_data
 
 # Fill these in to switch the matching buttons on. Empty = hidden.
 ABOUT_LINKS = {
@@ -29,7 +29,6 @@ ABOUT_EMAILJS = {
     "template": "template_q4x6tth",
     "key": "aI14LXH9_lJrPbSQ5",
 }
-
 
 # Built-in songs. Each file goes in chords/static/chords/songs/. A song whose file is missing is hidden.
 SONGS = [
@@ -74,9 +73,24 @@ def assistant(request):
         "chord_types": chord_types,
     })
 
+# the keys you can pick: black keys appear twice, once as a sharp and once as a flat
+KEY_CHOICES = [
+    ("C", "C"), ("C#", "C♯"), ("Db", "D♭"), ("D", "D"), ("D#", "D♯"), ("Eb", "E♭"), ("E", "E"),
+    ("F", "F"), ("F#", "F♯"), ("Gb", "G♭"), ("G", "G"), ("G#", "G♯"), ("Ab", "A♭"), ("A", "A"),
+    ("A#", "A♯"), ("Bb", "B♭"), ("B", "B"),
+]
+
+
 def learn(request):
     return render(request, "chords/learn.html", {
         "note_names": SHARP_NAMES,
+        "key_choices": KEY_CHOICES,
+        "scale_data": scale_data.scale_page_data(),
+        "note_values": notation.note_value_rows(),
+        "dynamics": notation.DYNAMICS,
+        "tempos": notation.tempo_rows(),
+        "keys": notation.key_signature_rows(),
+        "sections": notation.REFERENCE_SECTIONS,
         "six_words": lessons.SIX_WORDS,
         "sentences": lessons.SENTENCES,
         "three_bs": lessons.THREE_BS,
@@ -84,16 +98,25 @@ def learn(request):
     })
 
 def practice(request):
-    return render(request, "chords/practice.html", {"note_names": SHARP_NAMES})
-
-def notation_page(request):
-    return render(request, "chords/notation.html", {
-        "note_values": notation.note_value_rows(),
-        "dynamics": notation.DYNAMICS,
-        "tempos": notation.tempo_rows(),
-        "keys": notation.key_signature_rows(),
-        "sections": notation.REFERENCE_SECTIONS,
+    library = []
+    for song in SONGS:
+        if (SONGS_DIR / song["file"]).exists():
+            library.append({**song, "url": static("chords/songs/" + song["file"])})
+    return render(request, "chords/practice.html", {
+        "note_names": SHARP_NAMES, "key_choices": KEY_CHOICES, "library": library,
     })
+
+
+def _moved(target, fragment):
+    """The old Notation, Scales and Songs pages now live inside Learn and Practice.
+    Old links and bookmarks still work: they land on the right section."""
+    def view(request):
+        query = request.META.get("QUERY_STRING", "")
+        return redirect(target + ("?" + query if query else "") + "#" + fragment, permanent=True)
+    return view
+
+
+notation_page = _moved("/learn/", "notation")
 
 @require_GET
 def api_identify(request):
@@ -171,12 +194,11 @@ def studio(request):
     return render(request, "chords/studio.html", {
         "tracks": STUDIO_TRACKS,
         "steps": range(16),
+        "scales": [{"name": s["name"], "steps": s["steps"]} for s in scale_data.all_scales()],
     })
 
 
-def songs(request):
-    library = []
-    for song in SONGS:
-        if (SONGS_DIR / song["file"]).exists():
-            library.append({**song, "url": static("chords/songs/" + song["file"])})
-    return render(request, "chords/songs.html", {"library": library})
+scales = _moved("/learn/", "scales")
+
+
+songs = _moved("/practice/", "songs")

@@ -1,22 +1,4 @@
-{% extends "chords/base.html" %}
-{% load static %}
-
-{% block title %}Notation · TCsMusic{% endblock %}
-
-{% block content %}
-  <div class="notation-top-grid">
-    <div class="notation-top-intro">
-      <h1 class="notation-page-title">Notation</h1>
-      <p class="notation-page-intro">
-        The signs and words on a page of music, with everything you can hear marked ▶.
-      </p>
-    </div>
-    <p id="notation-status" class="notation-status" aria-live="polite">Press a play button.</p>
-  </div>
-
-  {% include "chords/_keyboard.html" %}
-
-  <div class="notation-grid">
+<div class="notation-grid">
     <section class="notation-values-section" id="values">
       <h2 class="notation-values-heading">I. Note values</h2>
       <p class="notation-values-text">
@@ -119,11 +101,3 @@
   </div>
 
   <script id="notation-api-scale" type="application/json">"{% url 'chords:api-scale' %}"</script>
-{% endblock %}
-
-{% block scripts %}
-  <script src="{% static 'chords/piano-core.js' %}"></script>
-  <script src="{% static 'chords/midi.js' %}"></script>
-  <script src="{% static 'chords/typing.js' %}"></script>
-  <script src="{% static 'chords/notation.js' %}"></script>
-{% endblock %}

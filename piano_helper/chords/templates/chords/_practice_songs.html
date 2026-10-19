@@ -1,22 +1,4 @@
-{% extends "chords/base.html" %}
-{% load static %}
-
-{% block title %}Songs · TCsMusic{% endblock %}
-
-{% block content %}
-  <div class="songs-top-grid">
-    <div class="songs-top-intro">
-      <h1 class="songs-page-title">Songs</h1>
-      <p class="songs-page-intro">
-        Watch a piece play on the keys, load your own MIDI file, or record yourself
-        and export it to FL Studio.
-      </p>
-    </div>
-  </div>
-
-  {% include "chords/_keyboard.html" %}
-
-  <div class="songs-grid">
+<div class="songs-grid">
     <section class="songs-card songs-now-card">
       <h2 class="songs-heading">Now playing</h2>
       <p class="songs-now-title" id="songs-now-title">Nothing loaded yet</p>
@@ -77,13 +59,3 @@
       </div>
     </section>
   </div>
-{% endblock %}
-
-{% block scripts %}
-  <script src="{% static 'chords/piano-core.js' %}"></script>
-  <script src="{% static 'chords/midi.js' %}"></script>
-  <script src="{% static 'chords/typing.js' %}"></script>
-  <script src="{% static 'chords/midifile.js' %}"></script>
-  <script src="{% static 'chords/songstore.js' %}"></script>
-  <script src="{% static 'chords/songs.js' %}"></script>
-{% endblock %}

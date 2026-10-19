@@ -46,10 +46,6 @@
          {% if request.resolver_match.url_name == 'learn' %}aria-current="page"{% endif %}>Learn</a>
       <a class="site-nav-link" href="{% url 'chords:practice' %}"
          {% if request.resolver_match.url_name == 'practice' %}aria-current="page"{% endif %}>Practice</a>
-      <a class="site-nav-link" href="{% url 'chords:notation' %}"
-         {% if request.resolver_match.url_name == 'notation' %}aria-current="page"{% endif %}>Notation</a>
-      <a class="site-nav-link" href="{% url 'chords:songs' %}"
-         {% if request.resolver_match.url_name == 'songs' %}aria-current="page"{% endif %}>Songs</a>
       <a class="site-nav-link" href="{% url 'chords:studio' %}"
          {% if request.resolver_match.url_name == 'studio' %}aria-current="page"{% endif %}>Studio</a>
       <a class="site-nav-link" href="{% url 'chords:about' %}"
@@ -78,9 +74,9 @@
         <ul class="site-footer-list">
           <li><a href="{% url 'chords:assistant' %}">Chord assistant</a></li>
           <li><a href="{% url 'chords:learn' %}">Learn</a></li>
+          <li><a href="{% url 'chords:learn' %}#scales">Scales</a></li>
           <li><a href="{% url 'chords:practice' %}">Practice</a></li>
-          <li><a href="{% url 'chords:notation' %}">Notation</a></li>
-          <li><a href="{% url 'chords:songs' %}">Songs</a></li>
+          <li><a href="{% url 'chords:practice' %}#songs">Songs</a></li>
           <li><a href="{% url 'chords:studio' %}">Studio</a></li>
         </ul>
       </nav>
@@ -98,10 +94,10 @@
       <nav class="site-footer-col" aria-label="Reference">
         <h2 class="site-footer-heading">Reference</h2>
         <ul class="site-footer-list">
-          <li><a href="{% url 'chords:notation' %}#values">Note values</a></li>
-          <li><a href="{% url 'chords:notation' %}#dynamics">Dynamics</a></li>
-          <li><a href="{% url 'chords:notation' %}#tempo">Tempo</a></li>
-          <li><a href="{% url 'chords:notation' %}#keys">Key signatures</a></li>
+          <li><a href="{% url 'chords:learn' %}#values">Note values</a></li>
+          <li><a href="{% url 'chords:learn' %}#dynamics">Dynamics</a></li>
+          <li><a href="{% url 'chords:learn' %}#tempo">Tempo</a></li>
+          <li><a href="{% url 'chords:learn' %}#keys">Key signatures</a></li>
           <li><a href="{% url 'chords:about' %}#reference">Shortcuts &amp; chords</a></li>
           <li><a href="{% url 'chords:about' %}#contact">Contact</a></li>
           <li><a href="{% url 'chords:about' %}#support">Support me</a></li>

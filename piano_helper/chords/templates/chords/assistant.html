@@ -17,7 +17,7 @@
 
     <section class="main-chord-panel">
       <div class="main-wheel-layout">
-        <svg id="main-wheel" class="main-wheel" viewBox="-110 -110 220 220" role="group" aria-label="Chord wheel: circle of fifths"></svg>
+        <svg id="main-wheel" class="main-wheel" viewBox="-146 -146 292 292" role="group" aria-label="Chord wheel: circle of fifths"></svg>
         <div class="main-wheel-side">
           <p class="main-wheel-readout"><span id="main-wheel-name" class="main-wheel-name">C</span> <span id="main-wheel-label" class="main-wheel-label">Major</span></p>
 
@@ -36,7 +36,7 @@
             </label>
           </div>
 
-          <h3 class="main-wheel-sub-title">Chords that sit well with it</h3>
+          <h3 class="main-wheel-sub-title">The seven chords of this key</h3>
           <div id="main-wheel-related" class="main-wheel-related"></div>
 
           <h3 class="main-wheel-sub-title">Chord type</h3>
@@ -153,6 +153,7 @@
 
 {% block scripts %}
   <script src="{% static 'chords/piano-core.js' %}"></script>
+  <script src="{% static 'chords/midihub.js' %}"></script>
   <script src="{% static 'chords/midi.js' %}"></script>
   <script src="{% static 'chords/typing.js' %}"></script>
   <script src="{% static 'chords/wheel.js' %}"></script>

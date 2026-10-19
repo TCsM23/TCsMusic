@@ -1,0 +1,67 @@
+<div class="learn-grid">
+    <section class="learn-letters-section" id="letters">
+      <h2 class="learn-letters-heading">Letters: the numbers of a scale</h2>
+      <p class="learn-letters-text">
+        Instead of C D E F G A B, think 1 2 3 4 5 6 7. The numbers stay the same in every key,
+        so what you learn in one key works in all twelve.
+      </p>
+      <div class="learn-button-row">
+        <button type="button" class="learn-play-button" data-kind="scale" data-scale="major">▶ Major scale</button>
+        <button type="button" class="learn-play-button" data-kind="scale" data-scale="minor">▶ Minor scale</button>
+      </div>
+    </section>
+
+    <section class="learn-words-section" id="words">
+      <h2 class="learn-words-heading">Words: six chords</h2>
+      <p class="learn-words-intro">Six chords cover most songs. Each has a number and a job.</p>
+      <ul class="learn-words-grid">
+        {% for word in six_words %}
+          <li class="learn-words-item">
+            <button type="button" class="learn-play-button learn-play-chip" data-kind="progression"
+                    data-numerals="{{ word.numeral }}">▶ {{ word.numeral }}</button>
+            <div>
+              <h3 class="learn-words-role">{{ word.role }}</h3>
+              <p class="learn-words-text">{{ word.text }}</p>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section class="learn-sentences-section" id="sentences">
+      <h2 class="learn-sentences-heading">Sentences: progressions</h2>
+      <ul class="learn-sentences-list">
+        {% for s in sentences %}
+          <li class="learn-sentences-item">
+            <button type="button" class="learn-play-button" data-kind="progression"
+                    data-numerals="{{ s.numerals }}">▶ {{ s.numerals }}</button>
+            <div>
+              <h3 class="learn-sentences-name">{{ s.name }}</h3>
+              <p class="learn-sentences-text">{{ s.text }}</p>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section class="learn-patterns-section" id="patterns">
+      <h2 class="learn-patterns-heading">The three B’s: ways to play one chord</h2>
+      <ul class="learn-patterns-list">
+        {% for b in three_bs %}
+          <li class="learn-patterns-item">
+            <button type="button" class="learn-play-button" data-kind="pattern"
+                    data-pattern="{{ b.key }}">▶ {{ b.name }}</button>
+            <p class="learn-patterns-text">{{ b.text }}</p>
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section class="learn-travel-section" id="travel">
+      <h2 class="learn-travel-heading">Travel: move as little as possible</h2>
+      <p class="learn-travel-text">{{ travel_text }}</p>
+    </section>
+  </div>
+
+  <script id="learn-api-scale" type="application/json">"{% url 'chords:api-scale' %}"</script>
+  <script id="learn-api-progression" type="application/json">"{% url 'chords:api-progression' %}"</script>

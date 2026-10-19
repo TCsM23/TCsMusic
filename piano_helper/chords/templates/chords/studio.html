@@ -5,13 +5,14 @@
 
 {% block content %}
   {{ tracks|json_script:"studio-tracks-data" }}
+  {{ scales|json_script:"studio-scales-data" }}
   <div class="studio-top-grid">
     <h1 class="studio-page-title">Studio</h1>
     <p class="studio-page-intro">
-      A small music workstation. Build a drum pattern, write a melody on the piano roll, balance
-      everything on the mixer and download your loop as a WAV. Every sound is made live in your
-      browser, and your work is remembered here. Tick Sound-effect mode to make short sounds: slide and fade
-      notes in the Piano roll, then export one trimmed take.
+      A small music workstation. Add tracks (instruments, drums, bass, guitar, a sampler, or your own voice),
+      write notes on the piano roll, balance everything on the mixer and download your loop as a WAV, or every
+      track on its own as stems. Every sound is made live in your browser, and your work is remembered here.
+      Tick Sound-effect mode to make short sounds: slide and fade notes in the Piano roll, then export one trimmed take.
     </p>
   </div>
 
@@ -54,7 +55,15 @@
         <input type="checkbox" id="studio-sfx-mode"> Sound-effect mode
       </label>
 
+      <div class="studio-history" role="group" aria-label="Undo and redo">
+        <button type="button" class="studio-small-button" id="studio-undo" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
+        <button type="button" class="studio-small-button" id="studio-redo" title="Redo (Ctrl+Shift+Z)" disabled>↷ Redo</button>
+      </div>
+
+      <button type="button" class="studio-small-button studio-metro-button" id="studio-metro" aria-pressed="false" title="Metronome (M)">♩ Metronome</button>
+
       <button type="button" class="studio-clear-button studio-transport-push" id="studio-clear">Clear all</button>
+      <button type="button" class="studio-export-button" id="studio-stems" title="Every track on its own, as WAV files in one zip">⬇ Export stems</button>
       <button type="button" class="studio-export-button" id="studio-export">⬇ Export WAV</button>
     </div>
     <p class="studio-export-note" id="studio-export-note" role="status" aria-live="polite"></p>
@@ -68,14 +77,38 @@
         <p><kbd>[</kbd> <kbd>]</kbd> Tempo −1 / +1 (hold <kbd>Shift</kbd> for 10)</p>
         <p><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> Sequencer / Piano roll / Mixer</p>
         <p><kbd>E</kbd> Export WAV</p>
+        <p><kbd>M</kbd> Metronome on / off</p>
+        <p><kbd>Ctrl</kbd> + <kbd>Z</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd> Undo / redo</p>
         <p><kbd>PgUp</kbd> <kbd>PgDn</kbd> Piano roll up / down an octave</p>
         <p><kbd>↑</kbd> <kbd>↓</kbd> Move the selected note by a semitone (<kbd>Shift</kbd>: octave)</p>
         <p><kbd>←</kbd> <kbd>→</kbd> Move the selected note by the snap (<kbd>Shift</kbd>: one step)</p>
-        <p><kbd>D</kbd> Duplicate the selected note after itself</p>
+        <p><kbd>D</kbd> Duplicate the selected notes after themselves</p>
+        <p><kbd>V</kbd> <kbd>B</kbd> Roll: select tool / draw tool</p>
+        <p><kbd>Ctrl</kbd> + <kbd>A</kbd> <kbd>C</kbd> <kbd>X</kbd> <kbd>V</kbd> Roll: select all, copy, cut, paste at the playhead</p>
+        <p><kbd>Q</kbd> Roll: quantize the selection (or every note)</p>
         <p><kbd>H</kbd> Hear the selected note</p>
         <p><kbd>Del</kbd> Delete the selected note</p>
       </div>
     </details>
+  </section>
+
+  <section class="studio-card studio-tracks-card" id="studio-tracks-card">
+    <div class="studio-tracks-head">
+      <h2 class="studio-section-title">Tracks</h2>
+      <div class="studio-add-track" role="group" aria-label="Add a track">
+        <span class="studio-add-track-label">Add</span>
+        <button type="button" class="studio-small-button studio-add-track-button" data-type="inst">🎹 Instrument</button>
+        <button type="button" class="studio-small-button studio-add-track-button" data-type="drums">🥁 Drum Machine</button>
+        <button type="button" class="studio-small-button studio-add-track-button" data-type="bass">🎸 Bass</button>
+        <button type="button" class="studio-small-button studio-add-track-button" data-type="guitar">🎸 Guitar</button>
+        <button type="button" class="studio-small-button studio-add-track-button" data-type="sampler">🎛️ Sampler</button>
+        <button type="button" class="studio-small-button studio-add-track-button" data-type="audio">🎙️ Voice / Audio</button>
+        <button type="button" class="studio-small-button" id="studio-import-button" title="Each file becomes its own audio track">⇪ Import audio</button>
+        <input type="file" id="studio-import-audio" accept="audio/*,.wav,.mp3,.ogg,.m4a,.flac" multiple hidden>
+      </div>
+    </div>
+    <div class="studio-track-list" id="studio-track-list"></div>
+    <div class="studio-track-settings" id="studio-track-settings"></div>
   </section>
 
   <div class="studio-tabs" role="tablist" aria-label="Studio views">
@@ -83,6 +116,18 @@
     <button type="button" class="studio-tab" role="tab" data-tab="roll" aria-selected="false">Piano roll</button>
     <button type="button" class="studio-tab" role="tab" data-tab="mix" aria-selected="false">Mixer</button>
   </div>
+
+  <section class="studio-card studio-progress-card" aria-label="Song position">
+    <div class="studio-progress-readout">
+      <output class="studio-time" id="studio-time">00:00.0 / 00:00.0</output>
+      <output class="studio-barpos" id="studio-barpos">Bar 1 · Beat 1</output>
+      <span class="studio-progress-hint">Click or drag the bar to jump to a place.</span>
+    </div>
+    <div class="studio-progress" id="studio-progress" role="slider" tabindex="0" aria-label="Position in the loop"
+         aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <canvas id="studio-progress-canvas" class="studio-progress-canvas"></canvas>
+    </div>
+  </section>
 
   <section class="studio-card studio-panel" id="studio-panel-seq" role="tabpanel">
     <div class="studio-grid" id="studio-grid">
@@ -101,54 +146,89 @@
       {% endfor %}
     </div>
     <p class="studio-grid-hint">
-      One row per sound, sixteen steps per bar. Click a name to mute that row.
-      Hit Record and tap the pads to play beats in live.
+      Editing <strong id="studio-seq-owner">Drum Machine</strong>. One row per sound, sixteen steps per bar. Click a name to mute that row.
+      Hit Record and tap the pads to play beats in live. Pick another drum track in the list above to edit its pattern.
     </p>
   </section>
 
   <section class="studio-card studio-panel" id="studio-panel-roll" role="tabpanel" hidden>
-    <div class="studio-roll-bar">
-      <label class="studio-preset-label"><span>Snap</span>
-        <select id="studio-snap">
-          <option value="1">1/16</option>
-          <option value="2" selected>1/8</option>
-          <option value="4">1/4</option>
-        </select>
-      </label>
-      <button type="button" id="studio-roll-down" class="studio-small-button" aria-label="Roll lower">▾ Lower</button>
-      <output id="studio-roll-range" class="studio-roll-range">C3 – B5</output>
-      <button type="button" id="studio-roll-up" class="studio-small-button" aria-label="Roll higher">▴ Higher</button>
-      <div class="studio-roll-scale">
-        <label class="studio-preset-label"><span>Scale key</span><select id="studio-scale-key"></select></label>
-        <label class="studio-preset-label"><span>Scale</span><select id="studio-scale-mode"></select></label>
+    <div id="studio-roll-notes">
+      <div class="studio-roll-bar">
+        <div class="studio-tool-group" role="group" aria-label="Roll tool">
+          <button type="button" class="studio-small-button" id="studio-tool-draw" aria-pressed="true" title="Draw: click to add notes (B)">✎ Draw</button>
+          <button type="button" class="studio-small-button" id="studio-tool-select" aria-pressed="false" title="Select: drag a box round notes (V)">⬚ Select</button>
+        </div>
+        <label class="studio-preset-label"><span>Snap</span>
+          <select id="studio-snap">
+            <option value="1">1/16</option>
+            <option value="2" selected>1/8</option>
+            <option value="4">1/4</option>
+          </select>
+        </label>
+        <button type="button" id="studio-roll-down" class="studio-small-button" aria-label="Roll lower">▾ Lower</button>
+        <output id="studio-roll-range" class="studio-roll-range">C3 – B5</output>
+        <button type="button" id="studio-roll-up" class="studio-small-button" aria-label="Roll higher">▴ Higher</button>
+        <div class="studio-roll-scale">
+          <label class="studio-preset-label"><span>Scale key</span><select id="studio-scale-key"></select></label>
+          <label class="studio-preset-label"><span>Scale</span><select id="studio-scale-mode"></select></label>
+        </div>
+        <button type="button" id="studio-roll-clear" class="studio-small-button">Clear notes</button>
+        <span class="studio-roll-help">Click to add · click a note to edit it · drag to move · drag the right edge to stretch · right-click to delete · Shift-click or drag a box to select several · the bottom lane is the sustain pedal</span>
       </div>
-      <button type="button" id="studio-roll-clear" class="studio-small-button">Clear notes</button>
-      <span class="studio-roll-help">Click to add · click a note to edit it · drag to move · drag the right edge to stretch · right-click to delete</span>
+      <div class="studio-roll-tools" id="studio-roll-tools" role="group" aria-label="Edit the selected notes (or every note if none is selected)">
+        <span class="studio-roll-tools-label">Selection</span>
+        <button type="button" class="studio-small-button" data-roll-action="all" title="Select all (Ctrl+A)">Select all</button>
+        <button type="button" class="studio-small-button" data-roll-action="copy" title="Copy (Ctrl+C)">Copy</button>
+        <button type="button" class="studio-small-button" data-roll-action="cut" title="Cut (Ctrl+X)">Cut</button>
+        <button type="button" class="studio-small-button" id="studio-roll-paste" data-roll-action="paste" title="Paste at the playhead (Ctrl+V)" disabled>Paste</button>
+        <span class="studio-roll-tools-label">Transpose</span>
+        <button type="button" class="studio-small-button" data-roll-action="down12">−12</button>
+        <button type="button" class="studio-small-button" data-roll-action="down1">−1</button>
+        <button type="button" class="studio-small-button" data-roll-action="up1">+1</button>
+        <button type="button" class="studio-small-button" data-roll-action="up12">+12</button>
+        <span class="studio-roll-tools-label">Tidy</span>
+        <button type="button" class="studio-small-button" data-roll-action="quantize" title="Snap starts and lengths to the grid (Q)">Quantize</button>
+        <button type="button" class="studio-small-button" data-roll-action="legato" title="Stretch each note until the next one starts">Legato</button>
+        <button type="button" class="studio-small-button" data-roll-action="humanize" title="A little random in timing and loudness">Humanize</button>
+        <button type="button" class="studio-small-button" data-roll-action="velocity" title="Random loudness">Random volume</button>
+      </div>
+      <div class="studio-note-editor studio-note-editor-empty" id="studio-note-editor">
+        <strong class="studio-note-editor-title" id="studio-note-title">No note selected</strong>
+        <label class="studio-preset-label"><span>Sound</span><select id="studio-note-inst"></select></label>
+        <label class="studio-note-editor-slider"><span>Volume <output id="studio-note-vel-value">80%</output></span>
+          <input type="range" id="studio-note-vel" min="5" max="100" value="80"></label>
+        <label class="studio-note-editor-slider"><span>Slide <output id="studio-note-glide-value">0 st</output></span>
+          <input type="range" id="studio-note-glide" min="-48" max="48" step="1" value="0"></label>
+        <label class="studio-note-editor-slider"><span>Fade in <output id="studio-note-fadein-value">0%</output></span>
+          <input type="range" id="studio-note-fadein" min="0" max="100" step="5" value="0"></label>
+        <label class="studio-note-editor-slider"><span>Fade out <output id="studio-note-fadeout-value">0%</output></span>
+          <input type="range" id="studio-note-fadeout" min="0" max="100" step="5" value="0"></label>
+        <label class="studio-preset-label"><span>Change</span>
+          <select id="studio-note-scope">
+            <option value="one">This note (or the selection)</option>
+            <option value="chord">Notes starting here</option>
+            <option value="sound">Every note with this sound</option>
+          </select>
+        </label>
+        <button type="button" id="studio-note-hear" class="studio-small-button">▶ Hear it</button>
+        <button type="button" id="studio-note-delete" class="studio-small-button">Delete</button>
+        <p class="studio-note-editor-help">Click a note to edit it. Slide bends the pitch by that many semitones by the end of the note. A fade is the share of the note spent rising from, or falling to, silence. Notes you place use the sound of the track you are working on.</p>
+      </div>
+      <div class="studio-roll-scroll" id="studio-roll-scroll">
+        <canvas id="studio-roll" class="studio-roll" aria-label="Piano roll"></canvas>
+      </div>
     </div>
-    <div class="studio-note-editor studio-note-editor-empty" id="studio-note-editor">
-      <strong class="studio-note-editor-title" id="studio-note-title">No note selected</strong>
-      <label class="studio-preset-label"><span>Sound</span><select id="studio-note-inst"></select></label>
-      <label class="studio-note-editor-slider"><span>Volume <output id="studio-note-vel-value">80%</output></span>
-        <input type="range" id="studio-note-vel" min="5" max="100" value="80"></label>
-      <label class="studio-note-editor-slider"><span>Slide <output id="studio-note-glide-value">0 st</output></span>
-        <input type="range" id="studio-note-glide" min="-48" max="48" step="1" value="0"></label>
-      <label class="studio-note-editor-slider"><span>Fade in <output id="studio-note-fadein-value">0%</output></span>
-        <input type="range" id="studio-note-fadein" min="0" max="100" step="5" value="0"></label>
-      <label class="studio-note-editor-slider"><span>Fade out <output id="studio-note-fadeout-value">0%</output></span>
-        <input type="range" id="studio-note-fadeout" min="0" max="100" step="5" value="0"></label>
-      <label class="studio-preset-label"><span>Change</span>
-        <select id="studio-note-scope">
-          <option value="one">This note</option>
-          <option value="chord">Notes starting here</option>
-          <option value="sound">Every note with this sound</option>
-        </select>
-      </label>
-      <button type="button" id="studio-note-hear" class="studio-small-button">▶ Hear it</button>
-      <button type="button" id="studio-note-delete" class="studio-small-button">Delete</button>
-      <p class="studio-note-editor-help">Click a note to edit it. Slide bends the pitch by that many semitones by the end of the note. A fade is the share of the note spent rising from, or falling to, silence.</p>
-    </div>
-    <div class="studio-roll-scroll" id="studio-roll-scroll">
-      <canvas id="studio-roll" class="studio-roll" aria-label="Piano roll"></canvas>
+
+    <div id="studio-audio-panel" hidden>
+      <div class="studio-roll-bar">
+        <label class="studio-note-editor-slider"><span>Selected clip volume</span>
+          <input type="range" id="studio-clip-gain" min="0" max="200" value="100" disabled></label>
+        <button type="button" id="studio-clip-remove" class="studio-small-button" disabled>Remove clip</button>
+        <span class="studio-roll-help">Drag a clip to move it · click the ruler to jump · record or add a file in the track settings above</span>
+      </div>
+      <div class="studio-roll-scroll studio-lane-scroll">
+        <canvas id="studio-audio-lane" class="studio-roll" aria-label="Audio clips"></canvas>
+      </div>
     </div>
   </section>
 
@@ -183,6 +263,9 @@
           <option value="harp">Harp</option>
           <option value="chiplead">Chip Lead</option>
           <option value="chipbass">Chip Bass</option>
+          <option value="bass">Bass</option>
+          <option value="guitar">Nylon Guitar</option>
+          <option value="eguitar">Electric Guitar</option>
           <option value="drone">Dark Drone</option>
           <option value="sine">Pure Sine</option>
           <option value="noise">Noise Sweep</option>

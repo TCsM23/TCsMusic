@@ -2,6 +2,8 @@
 
 SHARP_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
+FLAT_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
+
 FLAT_TO_SHARP = {"Db": "C#", "Eb": "D#", "Gb": "F#", "Ab": "G#", "Bb": "A#"}
 
 # key: (symbol, label, formula in semitones)
@@ -61,6 +63,15 @@ class TheoryError(ValueError):
     """Raise when someone asks for a note or chord that doesn't exist."""
 
 
+def spelling_for(name, key=False):
+    """Which names to print notes with: flat names when the root was asked for with a flat.
+    For a whole key (key=True), F major also reads better with flats (it has a B-flat)."""
+    clean = name.strip().capitalize()
+    if clean in FLAT_TO_SHARP or (key and clean == "F"):
+        return FLAT_NAMES
+    return SHARP_NAMES
+
+
 def note_to_pc(name):
     """'C' -> 0, 'Bb' -> 10, 'f#' -> 6."""
     name = name.strip().capitalize()
@@ -77,13 +88,14 @@ def build_chord(root, quality="maj", octave=4):
     symbol, label, formula = CHORD_QUALITIES[quality]
     root_pc = note_to_pc(root)
 
-    notes = [SHARP_NAMES[(root_pc + step) % 12] for step in formula]
+    names = spelling_for(root)
+    notes = [names[(root_pc + step) % 12] for step in formula]
     base = 12 * (octave + 1) + root_pc          # C4 = 60
     midi = [base + step for step in formula]
 
     return {
-        "name": SHARP_NAMES[root_pc] + symbol,
-        "label": f"{SHARP_NAMES[root_pc]} {label}",
+        "name": names[root_pc] + symbol,
+        "label": f"{names[root_pc]} {label}",
         "notes": notes,
         "midi": midi
     }
@@ -94,9 +106,10 @@ def build_scale(root, scale="major", octave=4):
     label, steps = SCALES[scale]
     root_pc = note_to_pc(root)
     base = 12 * (octave + 1) + root_pc
+    names = spelling_for(root, key=True)
     return {
-        "name": f"{SHARP_NAMES[root_pc]} {label}",
-        "notes": [SHARP_NAMES[(root_pc + s) % 12] for s in steps],
+        "name": f"{names[root_pc]} {label}",
+        "notes": [names[(root_pc + s) % 12] for s in steps],
         "midi": [base + s for s in steps] + [base + 12],
     }
 
@@ -115,14 +128,15 @@ def build_progression(key, numerals, octave=4):
     if not tokens:
         raise TheoryError("Give at least one number, like 1-5-6m-4")
 
+    names = spelling_for(key, key=True)
     chords = []
     for token in tokens:
         degree, quality = parse_numeral(token)
-        root_name = SHARP_NAMES[(key_pc + DEGREE_OFFSETS[degree]) % 12]
+        root_name = names[(key_pc + DEGREE_OFFSETS[degree]) % 12]
         chord = build_chord(root_name, quality, octave)
         chord["numeral"] = token
         chords.append(chord)
-    return {"key": SHARP_NAMES[key_pc], "chords": chords}
+    return {"key": names[key_pc], "chords": chords}
 
 
 INTERVAL_NAMES = {
