@@ -2445,3 +2445,238 @@ html[data-theme="light"] .learn-tabs-button.is-active, html[data-theme="light"] 
 /* dropdown lists follow the theme (the open list is drawn by the browser) */
 select option { background: #14080b; color: #f8f0f0; }
 html[data-theme="light"] select option { background: #fff; color: #2a0f10; }
+
+/* =====================================================================
+   Studio: one full-screen workstation
+   top bar · tracks + timeline · editor · bottom bar (views + export)
+   ===================================================================== */
+body.studio-page { overflow: hidden; height: 100dvh; }
+.studio-page .site-main-body { padding: 0; margin: 0; max-width: none; }
+.studio-page .site-backdrop { display: none; }
+.studio-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.studio-app {
+  --control-h: 2rem;
+  --studio-row-h: 56px;
+  --studio-side-w: 260px;
+  position: fixed; inset: 0; z-index: 10;
+  display: flex; flex-direction: column; min-width: 0;
+  background: radial-gradient(ellipse 70% 40% at 50% -10%, rgba(252, 58, 60, 0.14), transparent 70%), var(--ink);
+  color: var(--text);
+}
+.studio-app button { min-width: 0; }
+.studio-app select, .studio-app input[type="text"] { height: var(--control-h); }
+
+/* ---- top bar ---- */
+.studio-app-bar {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 0.7rem;
+  height: 3.1rem; padding: 0 0.7rem; overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+  border-bottom: 1px solid var(--line-red); background: var(--card-top);
+}
+.studio-app-bar::-webkit-scrollbar { display: none; }
+.studio-app-group { display: flex; align-items: center; gap: 0.4rem; flex: 0 0 auto; }
+.studio-app-centre { margin-left: auto; }
+.studio-app-meter { margin-left: auto; gap: 0.7rem; }
+.studio-app-push { margin-left: auto; }
+.studio-menu-button, .studio-icon-button { width: 2.2rem; height: 2.2rem; padding: 0; font-size: 1.15rem; background: transparent; border-color: var(--line-red); }
+.studio-menu-button:hover, .studio-icon-button:hover { background: var(--garnet); }
+.studio-app-brand { flex: 0 0 auto; font-family: var(--font-display); font-weight: 800; font-size: 1.05rem; color: var(--text); text-decoration: none; white-space: nowrap; }
+.studio-app-brand span { color: var(--poppy); }
+.studio-app .studio-play-button { min-width: 6.2rem; height: 2.2rem; padding: 0 0.9rem; border-radius: 999px; }
+.studio-app .studio-stop-button, .studio-app .studio-record-button { width: 2.2rem; height: 2.2rem; padding: 0; border-radius: 50%; background: transparent; border-color: var(--line-red); font-size: 1rem; }
+.studio-app .studio-record-button { color: #ff3b3b; }
+.studio-app .studio-record-button[aria-pressed="true"] { background: #ff2b2b; border-color: #fff; color: #fff; }
+.studio-app-clock { display: flex; flex-direction: column; line-height: 1.15; min-width: 8.4rem; margin-left: 0.3rem; }
+.studio-app-clock .studio-time { font-size: 1rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.studio-app-clock .studio-barpos { font-size: 0.75rem; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+.studio-app .studio-bpm-label { display: flex; flex-direction: row; align-items: center; gap: 0.45rem; margin: 0; white-space: nowrap; }
+.studio-app .studio-bpm-label span { font-weight: 800; font-size: 1rem; min-width: 4.2rem; }
+.studio-app .studio-bpm-label small { font-size: 0.7rem; letter-spacing: 0.08em; color: var(--muted); }
+.studio-app .studio-bpm-label input[type="range"] { width: 6rem; }
+.studio-app .studio-preset-label { display: flex; flex-direction: row; align-items: center; gap: 0.4rem; margin: 0; }
+.studio-app .studio-metro-button, .studio-app .studio-small-button, .studio-app .studio-export-button { height: var(--control-h); padding: 0 0.7rem; font-size: 0.88rem; }
+
+/* ---- site menu drawer ---- */
+.studio-drawer { position: fixed; inset: 0; z-index: 100; }
+.studio-drawer[hidden] { display: none; }
+.studio-drawer-shade { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.55); }
+.studio-drawer-panel {
+  position: absolute; left: 0; top: 0; bottom: 0; width: min(17rem, 82vw); display: flex; flex-direction: column; gap: 0.2rem;
+  padding: 1rem; background: var(--card-top); border-right: 1px solid var(--line-red); box-shadow: 10px 0 40px rgba(0, 0, 0, 0.6);
+  animation: studio-drawer-in 0.18s var(--ease-out);
+}
+@keyframes studio-drawer-in { from { transform: translateX(-100%); } to { transform: none; } }
+.studio-drawer-title { margin: 0 0 0.8rem; font-family: var(--font-display); font-weight: 800; font-size: 1.3rem; }
+.studio-drawer-title span { color: var(--poppy); }
+.studio-drawer-link { display: block; padding: 0.7rem 0.8rem; border-radius: 6px; color: var(--text); text-decoration: none; font-weight: 600; }
+.studio-drawer-link:hover { background: var(--surface-2); color: var(--poppy); }
+.studio-drawer-link[aria-current="page"] { background: rgba(252, 58, 60, 0.14); box-shadow: inset 3px 0 0 var(--poppy); }
+.studio-app .studio-drawer-theme { width: auto; align-self: flex-start; margin-top: 1rem; padding: 0 0.9rem; gap: 0.6rem; background: transparent; border-color: var(--line-red); color: var(--text); }
+.studio-drawer-theme svg { width: 1.1rem; height: 1.1rem; }
+
+/* ---- tracks and timeline ---- */
+.studio-app-arr {
+  flex: 0 1 auto; min-height: 0; max-height: 42%; overflow-y: auto; scrollbar-width: thin;
+  display: grid; grid-template-columns: var(--studio-side-w) minmax(0, 1fr);
+  border-bottom: 1px solid var(--line-red); background: var(--surface);
+}
+.studio-app-side { border-right: 1px solid var(--line); min-width: 0; }
+.studio-app-side-head {
+  position: sticky; top: 0; z-index: 5; height: 30px; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 0.5rem 0 0.8rem; background: var(--card-top); border-bottom: 1px solid var(--line);
+}
+.studio-app-side-head .studio-section-title { margin: 0; font-size: 0.74rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.studio-app-side-head .studio-small-button { height: 22px; padding: 0 0.55rem; font-size: 0.78rem; }
+.studio-add-wrap { position: relative; }
+.studio-app .studio-add-track { position: fixed; z-index: 60; display: grid; gap: 2px; min-width: 13rem; padding: 0.3rem; background: var(--card-top); border: 1px solid var(--line-red); border-radius: 8px; box-shadow: 0 14px 30px rgba(0, 0, 0, 0.6); }
+.studio-app .studio-add-track[hidden] { display: none; }
+.studio-app .studio-add-track-button { height: 2rem; padding: 0 0.6rem; justify-content: flex-start; text-align: left; border-color: transparent; background: transparent; color: var(--text); font-size: 0.9rem; }
+.studio-app .studio-add-track-button:hover { background: var(--surface-2); border-color: var(--line-red); }
+
+.studio-app .studio-track-list { display: block; }
+.studio-app .studio-track-row {
+  box-sizing: border-box; height: var(--studio-row-h);
+  display: grid; grid-template-columns: minmax(0, 1fr) 26px 26px; grid-template-rows: 1fr 1fr;
+  grid-template-areas: "name mute solo" "vol pan pan"; gap: 2px 4px; align-items: center;
+  padding: 3px 8px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent;
+}
+.studio-app .studio-track-row.is-active { background: rgba(255, 59, 59, 0.1); box-shadow: inset 3px 0 0 var(--poppy); }
+.studio-app .studio-track-name { grid-area: name; height: 24px; min-width: 0; padding: 0 0.2rem; gap: 0.4rem; align-items: center; }
+.studio-app .studio-track-title { font-size: 0.9rem; }
+.studio-app .studio-track-kind { font-size: 0.72rem; }
+.studio-app .studio-track-row .studio-mix-mute { grid-area: mute; width: 26px; min-width: 0; height: 22px; font-size: 0.75rem; }
+.studio-app .studio-track-row .studio-mix-solo { grid-area: solo; width: 26px; min-width: 0; height: 22px; font-size: 0.75rem; }
+.studio-app .studio-track-vol { grid-area: vol; width: 100%; height: 16px; }
+.studio-app .studio-track-pan { grid-area: pan; width: 100%; height: 16px; }
+
+.studio-app-time { min-width: 0; position: relative; }
+.studio-app .studio-progress { position: sticky; top: 0; z-index: 5; height: 30px; border-radius: 0; border-bottom: 1px solid var(--line); }
+.studio-app .studio-progress-canvas { border-radius: 0; }
+.studio-lanes-canvas { display: block; cursor: pointer; }
+
+/* ---- editor ---- */
+.studio-app-editor { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; background: var(--surface); }
+.studio-app .studio-track-settings {
+  flex: 0 0 auto; margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 1.1rem;
+  padding: 0.4rem 0.8rem; border: 0; border-bottom: 1px solid var(--line);
+}
+.studio-app .studio-track-settings[hidden] { display: none; }
+.studio-app .studio-settings-row { display: contents; }
+.studio-app .studio-setting { min-width: 0; flex-direction: row; align-items: center; gap: 0.45rem; margin: 0; }
+.studio-app .studio-setting > span { white-space: nowrap; }
+.studio-app .studio-setting input[type="range"] { width: 5.5rem; }
+.studio-app .studio-setting input[type="text"] { width: 9rem; }
+.studio-app .studio-setting select { max-width: 11rem; }
+.studio-app .studio-settings-info { margin: 0; font-size: 0.8rem; }
+.studio-app-panels { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+.studio-app .studio-panel { flex: 1 1 0; min-height: 0; overflow: auto; padding: 0.6rem 0.8rem; margin: 0; background: transparent; border: 0; border-radius: 0; }
+.studio-app .studio-panel[hidden] { display: none; }
+.studio-app .studio-grid-hint { margin: 0.4rem 0 0; font-size: 0.8rem; }
+
+/* sequencer: the rows share whatever height there is */
+.studio-app #studio-panel-seq:not([hidden]) { display: flex; flex-direction: column; overflow: hidden; }
+.studio-app .studio-grid { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.studio-app .studio-grid-row { flex: 1 1 0; min-height: 0; max-height: 3.6rem; }
+.studio-app .studio-grid-steps { height: 100%; grid-template-columns: repeat(var(--steps, 16), minmax(0, 1fr)); }
+.studio-app .studio-grid-step { height: 100%; min-height: 0; }
+.studio-app .studio-grid-step[hidden] { display: none; }
+.studio-app .studio-grid-step:nth-child(4n + 1) { background: rgba(255, 238, 238, 0.06); }
+.studio-app .studio-grid-step.is-beat { background: rgba(255, 238, 238, 0.13); }
+.studio-app .studio-grid-step[aria-pressed="true"] { background: var(--furious); border-color: var(--line-red); }
+.studio-app #studio-panel-seq .studio-grid-hint { flex: 0 0 auto; }
+html[data-theme="light"] .studio-app .studio-grid-step:nth-child(4n + 1) { background: rgba(80, 10, 12, 0.06); }
+html[data-theme="light"] .studio-app .studio-grid-step.is-beat { background: rgba(80, 10, 12, 0.13); }
+html[data-theme="light"] .studio-app .studio-grid-step[aria-pressed="true"] { background: var(--furious); }
+
+/* piano roll: the grid takes every pixel left; its rows resize to fit, so nothing scrolls */
+.studio-app #studio-panel-roll:not([hidden]) { display: flex; flex-direction: column; overflow: hidden; padding: 0.4rem 0.6rem; }
+.studio-app #studio-roll-notes:not([hidden]), .studio-app #studio-audio-panel:not([hidden]) { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; }
+.studio-app .studio-roll-scroll { flex: 1 1 0; min-height: 0; overflow: auto; scrollbar-width: none; }
+.studio-app .studio-roll-scroll::-webkit-scrollbar { display: none; }
+.studio-app .studio-roll-bar { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.7rem; margin: 0 0 0.3rem; }
+.studio-app .studio-roll-bar .studio-small-button, .studio-app .studio-roll-tools .studio-small-button, .studio-app .studio-note-editor .studio-small-button { height: 1.8rem; padding: 0 0.6rem; font-size: 0.84rem; }
+.studio-app .studio-roll-bar select, .studio-app .studio-note-editor select { height: 1.8rem; }
+.studio-app .studio-roll-scale { display: flex; align-items: center; gap: 0.6rem; margin-left: 0; }
+.studio-app .studio-roll-help, .studio-app .studio-note-editor-help { display: none; }
+.studio-app .studio-roll-tools { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.5rem; margin: 0 0 0.3rem; }
+.studio-app .studio-note-editor {
+  flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.9rem; margin: 0 0 0.4rem; padding: 0.25rem 0.6rem;
+}
+.studio-app .studio-note-editor label { flex-direction: row; align-items: center; gap: 0.4rem; margin: 0; min-width: 0; }
+.studio-app .studio-note-editor-title { min-width: 0; margin: 0; font-size: 0.88rem; }
+.studio-app .studio-note-editor input[type="range"] { width: 5rem; }
+.studio-app .studio-note-editor select { min-width: 8rem; max-width: 12rem; }
+
+/* mixer, pads, keys, midi simply fill the panel */
+.studio-app .studio-mixer { padding-bottom: 0; }
+
+/* ---- bottom bar: the views, plus export ---- */
+.studio-app-foot {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 0.6rem; height: 2.9rem; padding: 0 0.7rem;
+  border-top: 1px solid var(--line-red); background: var(--card-top);
+}
+.studio-app .studio-tabs { display: flex; flex-wrap: nowrap; gap: 0.2rem; margin: 0; padding: 0; border: 0; overflow-x: auto; scrollbar-width: none; }
+.studio-app .studio-tab {
+  height: 2.2rem; padding: 0 1rem; white-space: nowrap; background: transparent; color: var(--muted);
+  border: 1px solid transparent; border-radius: 8px; font-weight: 700;
+}
+.studio-app .studio-tab:hover { color: var(--text); background: var(--surface-2); }
+.studio-app .studio-tab[aria-selected="true"] { color: #fff; background: var(--garnet); border-color: var(--furious); }
+.studio-app .studio-export-note { margin: 0; font-size: 0.8rem; color: var(--muted); max-width: 18rem; }
+.studio-app .studio-export-note:empty { display: none; }
+.studio-more { position: relative; }
+.studio-more > summary { list-style: none; display: inline-flex; align-items: center; height: var(--control-h); padding: 0 0.8rem; border: 1px solid var(--line-red); border-radius: 8px; cursor: pointer; font-weight: 700; color: var(--text); }
+.studio-more > summary::-webkit-details-marker { display: none; }
+.studio-more[open] > summary { background: var(--garnet); color: #fff; }
+.studio-more-menu {
+  position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 40;
+  width: min(44rem, 94vw); max-height: 70vh; overflow: auto;
+  display: grid; gap: 0.7rem; padding: 1rem;
+  background: var(--card-top); border: 1px solid var(--line-red); border-radius: 10px; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+  color: var(--text); font-size: 0.9rem;
+}
+.studio-more-menu .studio-preset-label { flex-direction: row; align-items: center; gap: 0.6rem; }
+.studio-more-title { margin: 0.4rem 0 0; font-size: 0.8rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+.studio-more-menu .studio-shortcuts-grid { margin-top: 0; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); }
+.studio-more-menu .studio-shortcuts-grid p { line-height: 1.7; }
+.studio-more-menu kbd { display: inline-block; min-width: 1.7rem; padding: 0.1rem 0.45rem; margin-right: 0.25rem; text-align: center; font: 700 0.78rem/1.4 inherit; color: var(--text); background: var(--ink); border: 1px solid var(--line-red); border-bottom-width: 2px; border-radius: 4px; }
+
+html[data-theme="light"] .studio-app { background: radial-gradient(ellipse 70% 40% at 50% -10%, rgba(252, 58, 60, 0.1), transparent 70%), var(--ink); }
+html[data-theme="light"] .studio-app .studio-track-row.is-active { background: rgba(190, 20, 30, 0.08); }
+html[data-theme="light"] .studio-app .studio-tab[aria-selected="true"], html[data-theme="light"] .studio-more[open] > summary { color: #fff; }
+html[data-theme="light"] .studio-more-menu kbd { background: #fff; }
+html[data-theme="light"] .studio-menu-button, html[data-theme="light"] .studio-icon-button { color: var(--text); }
+html[data-theme="light"] .studio-menu-button:hover, html[data-theme="light"] .studio-icon-button:hover { color: #fff; }
+
+@media (max-width: 900px) {
+  .studio-app-arr { grid-template-columns: minmax(0, 1fr); max-height: 34%; }
+  .studio-lanes-canvas, .studio-app-time { display: none; }
+  .studio-app-side { border-right: 0; }
+  .studio-app-brand, .studio-app-clock .studio-barpos { display: none; }
+  .studio-app-centre, .studio-app-meter { margin-left: 0; }
+  .studio-app-foot { gap: 0.3rem; }
+  .studio-app .studio-export-note { display: none; }
+  .studio-app .studio-panel { overflow: auto; }
+}
+.studio-app { --studio-side-w: 300px; }
+.studio-app .studio-note-editor .studio-note-editor-slider { display: flex; flex-direction: row; align-items: center; gap: 0.4rem; height: 1.8rem; }
+.studio-app .studio-note-editor .studio-preset-label { height: 1.8rem; }
+.studio-app .studio-note-editor { row-gap: 0.1rem; min-height: 0; }
+.studio-app .studio-note-editor input[type="range"] { width: 4.2rem; }
+.studio-app .studio-note-editor select { min-width: 0; max-width: 9.5rem; font-size: 0.85rem; }
+.studio-app .studio-grid-hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.studio-app .studio-note-editor, .studio-app .studio-roll-tools, .studio-app .studio-roll-bar { font-size: 0.85rem; }
+.studio-app .studio-record-button { width: auto; min-width: 4.4rem; padding: 0 0.8rem; border-radius: 999px; font-size: 0.88rem; }
+.studio-app .studio-grid-hint { white-space: normal; overflow: visible; }
+.studio-app #studio-panel-seq .studio-grid-hint, .studio-app #studio-panel-mix .studio-grid-hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html[data-theme="light"] .studio-app .studio-track-name, html[data-theme="light"] .studio-app .studio-track-title, html[data-theme="light"] .studio-app .studio-track-kind { color: var(--text); }
+.studio-app .studio-tabs { flex: 1 1 auto; min-width: 0; }
+.studio-app .studio-tab { flex: 0 0 auto; }
+@media (max-width: 700px) {
+  .studio-app .studio-grid-row { grid-template-columns: 4.4rem minmax(0, 1fr); gap: 0.3rem; }
+  .studio-app .studio-grid-mute { padding: 0.2rem 0.3rem; font-size: 0.74rem; }
+  .studio-app .studio-grid-steps { gap: 0.12rem; }
+  #studio-stems { display: none; }
+  .studio-app .studio-track-settings { max-height: 7.5rem; overflow: auto; }
+}
+@media (max-width: 700px) { .studio-app .studio-tab { padding: 0 0.6rem; font-size: 0.85rem; } .studio-app-foot { gap: 0.3rem; padding: 0 0.4rem; } }

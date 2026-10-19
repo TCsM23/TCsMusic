@@ -2,134 +2,118 @@
 {% load static %}
 
 {% block title %}Studio · TCsMusic{% endblock %}
+{% block body_class %}studio-page{% endblock %}
+{% block site_header %}{% endblock %}
+{% block site_footer %}{% endblock %}
 
 {% block content %}
   {{ tracks|json_script:"studio-tracks-data" }}
   {{ scales|json_script:"studio-scales-data" }}
-  <div class="studio-top-grid">
-    <h1 class="studio-page-title">Studio</h1>
-    <p class="studio-page-intro">
-      A small music workstation. Add tracks (instruments, drums, bass, guitar, a sampler, or your own voice),
-      write notes on the piano roll, balance everything on the mixer and download your loop as a WAV, or every
-      track on its own as stems. Every sound is made live in your browser, and your work is remembered here.
-      Tick Sound-effect mode to make short sounds: slide and fade notes in the Piano roll, then export one trimmed take.
-    </p>
-  </div>
+  <h1 class="studio-sr-only">Studio</h1>
 
-  <section class="studio-card studio-transport-card">
-    <div class="studio-transport-row">
-      <button type="button" class="studio-play-button" id="studio-play" data-target="play" title="Play / pause (Space)">▶ Play</button>
-      <button type="button" class="studio-stop-button" id="studio-stop" data-target="stop" title="Stop (Esc)">■ Stop</button>
-      <button type="button" class="studio-record-button" id="studio-record" data-target="record" aria-pressed="false">● Record</button>
+  <div class="studio-app" id="studio-app">
+    <header class="studio-app-bar" role="toolbar" aria-label="Transport">
+      <button type="button" class="studio-menu-button" id="studio-menu-open" aria-expanded="false" aria-controls="studio-drawer" aria-label="Site menu" title="Menu">☰</button>
+      <a class="studio-app-brand" href="{% url 'chords:home' %}" title="TCsMusic home">TCs<span>Music</span></a>
 
-      <label class="studio-bpm-label" for="studio-bpm">
-        <span>Tempo · <output id="studio-bpm-value" for="studio-bpm">100</output> BPM</span>
-        <input type="range" id="studio-bpm" min="60" max="300" value="100" data-target="tempo">
-      </label>
-
-      <label class="studio-preset-label" for="studio-bars">
-        <span>Loop</span>
-        <select id="studio-bars" data-target="loop">
-          <option value="1">1 bar</option>
-          <option value="2">2 bars</option>
-          <option value="4">4 bars</option>
-          <option value="8">8 bars</option>
-          <option value="16">16 bars</option>
-        </select>
-      </label>
-
-    </div>
-    <div class="studio-transport-row studio-transport-row-options">
-      <label class="studio-preset-label" for="studio-preset">
-        <span>Start from</span>
-        <select id="studio-preset">
-          <option value="">Choose…</option>
-          <option value="four">Four on the floor</option>
-          <option value="boom">Boom bap</option>
-          <option value="half">Half-time</option>
-        </select>
-      </label>
-
-      <label class="studio-check-label" for="studio-sfx-mode"
-             title="For sound effects: drums play once, and Export WAV saves one take with the silence trimmed and the loudness matched.">
-        <input type="checkbox" id="studio-sfx-mode"> Sound-effect mode
-      </label>
-
-      <div class="studio-history" role="group" aria-label="Undo and redo">
-        <button type="button" class="studio-small-button" id="studio-undo" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
-        <button type="button" class="studio-small-button" id="studio-redo" title="Redo (Ctrl+Shift+Z)" disabled>↷ Redo</button>
+      <div class="studio-app-group studio-history" role="group" aria-label="Undo and redo">
+        <button type="button" class="studio-icon-button" id="studio-undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>↶</button>
+        <button type="button" class="studio-icon-button" id="studio-redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled>↷</button>
       </div>
 
-      <button type="button" class="studio-small-button studio-metro-button" id="studio-metro" aria-pressed="false" title="Metronome (M)">♩ Metronome</button>
-
-      <button type="button" class="studio-clear-button studio-transport-push" id="studio-clear">Clear all</button>
-      <button type="button" class="studio-export-button" id="studio-stems" title="Every track on its own, as WAV files in one zip">⬇ Export stems</button>
-      <button type="button" class="studio-export-button" id="studio-export">⬇ Export WAV</button>
-    </div>
-    <p class="studio-export-note" id="studio-export-note" role="status" aria-live="polite"></p>
-    <details class="studio-shortcuts" id="studio-shortcuts">
-      <summary>Keyboard shortcuts <span class="studio-shortcuts-hint">press ? to show or hide</span></summary>
-      <div class="studio-shortcuts-grid">
-        <p><kbd>Space</kbd> Play / pause (resumes where you stopped)</p>
-        <p><kbd>Esc</kbd> Stop and go back to the start</p>
-        <p><kbd>Enter</kbd> Play again from the start</p>
-        <p><kbd>R</kbd> Record on / off</p>
-        <p><kbd>[</kbd> <kbd>]</kbd> Tempo −1 / +1 (hold <kbd>Shift</kbd> for 10)</p>
-        <p><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> Sequencer / Piano roll / Mixer</p>
-        <p><kbd>E</kbd> Export WAV</p>
-        <p><kbd>M</kbd> Metronome on / off</p>
-        <p><kbd>Ctrl</kbd> + <kbd>Z</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd> Undo / redo</p>
-        <p><kbd>PgUp</kbd> <kbd>PgDn</kbd> Piano roll up / down an octave</p>
-        <p><kbd>↑</kbd> <kbd>↓</kbd> Move the selected note by a semitone (<kbd>Shift</kbd>: octave)</p>
-        <p><kbd>←</kbd> <kbd>→</kbd> Move the selected note by the snap (<kbd>Shift</kbd>: one step)</p>
-        <p><kbd>D</kbd> Duplicate the selected notes after themselves</p>
-        <p><kbd>V</kbd> <kbd>B</kbd> Roll: select tool / draw tool</p>
-        <p><kbd>Ctrl</kbd> + <kbd>A</kbd> <kbd>C</kbd> <kbd>X</kbd> <kbd>V</kbd> Roll: select all, copy, cut, paste at the playhead</p>
-        <p><kbd>Q</kbd> Roll: quantize the selection (or every note)</p>
-        <p><kbd>H</kbd> Hear the selected note</p>
-        <p><kbd>Del</kbd> Delete the selected note</p>
+      <div class="studio-app-group studio-app-centre">
+        <button type="button" class="studio-play-button" id="studio-play" data-target="play" title="Play / pause (Space)">▶ Play</button>
+        <button type="button" class="studio-stop-button" id="studio-stop" data-target="stop" title="Stop (Esc)">■</button>
+        <button type="button" class="studio-record-button" id="studio-record" data-target="record" aria-pressed="false" title="Record (R)">● Rec</button>
+        <div class="studio-app-clock" aria-label="Song position">
+          <output class="studio-time" id="studio-time">00:00.0 / 00:00.0</output>
+          <output class="studio-barpos" id="studio-barpos">Bar 1 · Beat 1</output>
+        </div>
       </div>
-    </details>
-  </section>
 
-  <section class="studio-card studio-tracks-card" id="studio-tracks-card">
-    <div class="studio-tracks-head">
-      <h2 class="studio-section-title">Tracks</h2>
-      <div class="studio-add-track" role="group" aria-label="Add a track">
-        <span class="studio-add-track-label">Add</span>
-        <button type="button" class="studio-small-button studio-add-track-button" data-type="inst">🎹 Instrument</button>
-        <button type="button" class="studio-small-button studio-add-track-button" data-type="drums">🥁 Drum Machine</button>
-        <button type="button" class="studio-small-button studio-add-track-button" data-type="bass">🎸 Bass</button>
-        <button type="button" class="studio-small-button studio-add-track-button" data-type="guitar">🎸 Guitar</button>
-        <button type="button" class="studio-small-button studio-add-track-button" data-type="sampler">🎛️ Sampler</button>
-        <button type="button" class="studio-small-button studio-add-track-button" data-type="audio">🎙️ Voice / Audio</button>
-        <button type="button" class="studio-small-button" id="studio-import-button" title="Each file becomes its own audio track">⇪ Import audio</button>
-        <input type="file" id="studio-import-audio" accept="audio/*,.wav,.mp3,.ogg,.m4a,.flac" multiple hidden>
+      <div class="studio-app-group studio-app-meter">
+        <button type="button" class="studio-small-button studio-metro-button" id="studio-metro" aria-pressed="false" title="Metronome (M)">♩ Click</button>
+        <label class="studio-bpm-label" for="studio-bpm">
+          <span><output id="studio-bpm-value" for="studio-bpm">100</output> <small>BPM</small></span>
+          <input type="range" id="studio-bpm" min="60" max="300" value="100" data-target="tempo" aria-label="Tempo">
+        </label>
+        <label class="studio-preset-label" for="studio-sig">
+          <span>Time</span>
+          <select id="studio-sig" title="Time signature">
+            <option value="2/4">2/4</option>
+            <option value="3/4">3/4</option>
+            <option value="4/4" selected>4/4</option>
+            <option value="5/4">5/4</option>
+            <option value="6/8">6/8</option>
+            <option value="7/8">7/8</option>
+            <option value="12/8">12/8</option>
+          </select>
+        </label>
+        <label class="studio-preset-label" for="studio-bars">
+          <span>Loop</span>
+          <select id="studio-bars" data-target="loop">
+            <option value="1">1 bar</option>
+            <option value="2">2 bars</option>
+            <option value="4">4 bars</option>
+            <option value="8">8 bars</option>
+            <option value="16">16 bars</option>
+          </select>
+        </label>
+      </div>
+    </header>
+
+    <div class="studio-drawer" id="studio-drawer" hidden>
+      <div class="studio-drawer-shade" id="studio-drawer-shade"></div>
+      <nav class="studio-drawer-panel" aria-label="Main">
+        <p class="studio-drawer-title">TCs<span>Music</span></p>
+        <a class="studio-drawer-link" href="{% url 'chords:home' %}">Home</a>
+        <a class="studio-drawer-link" href="{% url 'chords:assistant' %}">Assistant</a>
+        <a class="studio-drawer-link" href="{% url 'chords:learn' %}">Learn</a>
+        <a class="studio-drawer-link" href="{% url 'chords:practice' %}">Practice</a>
+        <a class="studio-drawer-link" href="{% url 'chords:studio' %}" aria-current="page">Studio</a>
+        <a class="studio-drawer-link" href="{% url 'chords:about' %}">About</a>
+        <button type="button" class="site-theme-toggle studio-drawer-theme" id="site-theme-toggle" aria-label="Switch to light mode" aria-pressed="false">
+          <svg class="site-theme-toggle-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+          <svg class="site-theme-toggle-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+          <span>Light / dark</span>
+        </button>
+      </nav>
+    </div>
+
+    <div class="studio-app-arr" id="studio-arr">
+      <aside class="studio-app-side" aria-label="Tracks">
+        <div class="studio-app-side-head">
+          <span class="studio-section-title">Tracks</span>
+          <div class="studio-add-wrap">
+            <button type="button" class="studio-small-button studio-add-open" id="studio-add-open" aria-expanded="false" aria-haspopup="true">+ Add track</button>
+            <div class="studio-add-track" id="studio-add-menu" role="menu" aria-label="Add a track" hidden>
+              <button type="button" class="studio-add-track-button" role="menuitem" data-type="inst">🎹 Instrument</button>
+              <button type="button" class="studio-add-track-button" role="menuitem" data-type="drums">🥁 Drum Machine</button>
+              <button type="button" class="studio-add-track-button" role="menuitem" data-type="bass">🎸 Bass</button>
+              <button type="button" class="studio-add-track-button" role="menuitem" data-type="guitar">🎸 Guitar</button>
+              <button type="button" class="studio-add-track-button" role="menuitem" data-type="sampler">🎛️ Sampler</button>
+              <button type="button" class="studio-add-track-button" role="menuitem" data-type="audio">🎙️ Voice / Audio</button>
+              <button type="button" class="studio-add-track-button" role="menuitem" id="studio-import-button" title="Each file becomes its own audio track">⇪ Import audio file</button>
+            </div>
+            <input type="file" id="studio-import-audio" accept="audio/*,.wav,.mp3,.ogg,.m4a,.flac" multiple hidden>
+          </div>
+        </div>
+        <div class="studio-track-list" id="studio-track-list"></div>
+      </aside>
+      <div class="studio-app-time">
+        <div class="studio-progress" id="studio-progress" role="slider" tabindex="0" aria-label="Position in the loop (click or drag to jump)"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" title="Click or drag to jump to a place">
+          <canvas id="studio-progress-canvas" class="studio-progress-canvas"></canvas>
+        </div>
+        <canvas id="studio-lanes" class="studio-lanes-canvas" aria-label="Every track along the loop. Click a lane to work on that track."></canvas>
       </div>
     </div>
-    <div class="studio-track-list" id="studio-track-list"></div>
-    <div class="studio-track-settings" id="studio-track-settings"></div>
-  </section>
 
-  <div class="studio-tabs" role="tablist" aria-label="Studio views">
-    <button type="button" class="studio-tab" role="tab" data-tab="seq" aria-selected="true">Sequencer</button>
-    <button type="button" class="studio-tab" role="tab" data-tab="roll" aria-selected="false">Piano roll</button>
-    <button type="button" class="studio-tab" role="tab" data-tab="mix" aria-selected="false">Mixer</button>
-  </div>
+    <div class="studio-app-editor">
+      <div class="studio-track-settings" id="studio-track-settings"></div>
 
-  <section class="studio-card studio-progress-card" aria-label="Song position">
-    <div class="studio-progress-readout">
-      <output class="studio-time" id="studio-time">00:00.0 / 00:00.0</output>
-      <output class="studio-barpos" id="studio-barpos">Bar 1 · Beat 1</output>
-      <span class="studio-progress-hint">Click or drag the bar to jump to a place.</span>
-    </div>
-    <div class="studio-progress" id="studio-progress" role="slider" tabindex="0" aria-label="Position in the loop"
-         aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-      <canvas id="studio-progress-canvas" class="studio-progress-canvas"></canvas>
-    </div>
-  </section>
-
-  <section class="studio-card studio-panel" id="studio-panel-seq" role="tabpanel">
+      <div class="studio-app-panels">
+        <section class="studio-panel" id="studio-panel-seq" role="tabpanel">
     <div class="studio-grid" id="studio-grid">
       {% for track in tracks %}
         <div class="studio-grid-row">
@@ -151,7 +135,7 @@
     </p>
   </section>
 
-  <section class="studio-card studio-panel" id="studio-panel-roll" role="tabpanel" hidden>
+        <section class="studio-panel" id="studio-panel-roll" role="tabpanel" hidden>
     <div id="studio-roll-notes">
       <div class="studio-roll-bar">
         <div class="studio-tool-group" role="group" aria-label="Roll tool">
@@ -232,21 +216,21 @@
     </div>
   </section>
 
-  <section class="studio-card studio-panel" id="studio-panel-mix" role="tabpanel" hidden>
+        <section class="studio-panel" id="studio-panel-mix" role="tabpanel" hidden>
     <div class="studio-mixer" id="studio-mixer"></div>
     <p class="studio-grid-hint">
       Each channel has a volume fader, a pan knob, mute (M) and solo (S). The meter moves with the sound.
     </p>
   </section>
 
-  <section class="studio-card studio-pads-card" id="studio-pads-card">
-    <h2 class="studio-section-title">Pads</h2>
+        <section class="studio-panel studio-pads-card" id="studio-panel-pads" role="tabpanel" hidden>
+    
     <p class="studio-grid-hint">Tap a pad with the mouse, or hit a pad on your keyboard. With Record on, hits land in the sequencer.</p>
     <div class="studio-pads" id="studio-pads"></div>
   </section>
 
-  <section class="studio-card studio-keys-card">
-    <h2 class="studio-section-title">Keys</h2>
+        <section class="studio-panel studio-keys-card" id="studio-panel-keys" role="tabpanel" hidden>
+    
     <div class="studio-keys-bar">
       <label class="studio-preset-label"><span>Sound</span>
         <select id="main-keyboard-instrument">
@@ -288,9 +272,9 @@
     </div>
   </section>
 
-  <section class="studio-card studio-midi-card" id="studio-midi">
+        <section class="studio-panel studio-midi-card" id="studio-midi" role="tabpanel" hidden>
     <div class="studio-midi-head">
-      <h2 class="studio-section-title">MIDI controller</h2>
+      
       <button type="button" id="studio-midi-connect" class="main-transport-button" aria-pressed="false">🎹 Connect MIDI</button>
       <p id="studio-midi-status" class="studio-midi-status" role="status" aria-live="polite">Not connected</p>
     </div>
@@ -325,10 +309,70 @@
       </div>
     </div>
   </section>
+      </div>
+    </div>
+
+    <footer class="studio-app-foot">
+      <div class="studio-tabs" role="tablist" aria-label="Studio views">
+        <button type="button" class="studio-tab" role="tab" data-tab="seq" aria-selected="true">Sequencer</button>
+        <button type="button" class="studio-tab" role="tab" data-tab="roll" aria-selected="false">Piano roll</button>
+        <button type="button" class="studio-tab" role="tab" data-tab="mix" aria-selected="false">Mixer</button>
+        <button type="button" class="studio-tab" role="tab" data-tab="pads" aria-selected="false">Pads</button>
+        <button type="button" class="studio-tab" role="tab" data-tab="keys" aria-selected="false">Keys</button>
+        <button type="button" class="studio-tab" role="tab" data-tab="midi" aria-selected="false">MIDI</button>
+      </div>
+      <div class="studio-app-group studio-app-push">
+        <p class="studio-export-note" id="studio-export-note" role="status" aria-live="polite"></p>
+        <button type="button" class="studio-export-button" id="studio-stems" title="Every track on its own, as WAV files in one zip">⬇ Stems</button>
+        <button type="button" class="studio-export-button" id="studio-export">⬇ Export WAV</button>
+        <details class="studio-more" id="studio-shortcuts">
+          <summary title="More options and keyboard shortcuts (?)">⋯ More</summary>
+          <div class="studio-more-menu">
+            <label class="studio-preset-label" for="studio-preset">
+              <span>Start from</span>
+              <select id="studio-preset">
+                <option value="">Choose…</option>
+                <option value="four">Four on the floor</option>
+                <option value="boom">Boom bap</option>
+                <option value="half">Half-time</option>
+              </select>
+            </label>
+            <label class="studio-check-label" for="studio-sfx-mode"
+                   title="For sound effects: drums play once, and Export WAV saves one take with the silence trimmed and the loudness matched.">
+              <input type="checkbox" id="studio-sfx-mode"> Sound-effect mode
+            </label>
+            <button type="button" class="studio-clear-button" id="studio-clear">Clear all</button>
+            <h2 class="studio-more-title">Keyboard shortcuts <span class="studio-shortcuts-hint">press ? to show or hide</span></h2>
+            <div class="studio-shortcuts-grid">
+        <p><kbd>Space</kbd> Play / pause (resumes where you stopped)</p>
+        <p><kbd>Esc</kbd> Stop and go back to the start</p>
+        <p><kbd>Enter</kbd> Play again from the start</p>
+        <p><kbd>R</kbd> Record on / off</p>
+        <p><kbd>[</kbd> <kbd>]</kbd> Tempo −1 / +1 (hold <kbd>Shift</kbd> for 10)</p>
+        <p><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> Sequencer / Piano roll / Mixer</p>
+        <p><kbd>E</kbd> Export WAV</p>
+        <p><kbd>M</kbd> Metronome on / off</p>
+        <p><kbd>Ctrl</kbd> + <kbd>Z</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd> Undo / redo</p>
+        <p><kbd>PgUp</kbd> <kbd>PgDn</kbd> Piano roll up / down an octave</p>
+        <p><kbd>↑</kbd> <kbd>↓</kbd> Move the selected note by a semitone (<kbd>Shift</kbd>: octave)</p>
+        <p><kbd>←</kbd> <kbd>→</kbd> Move the selected note by the snap (<kbd>Shift</kbd>: one step)</p>
+        <p><kbd>D</kbd> Duplicate the selected notes after themselves</p>
+        <p><kbd>V</kbd> <kbd>B</kbd> Roll: select tool / draw tool</p>
+        <p><kbd>Ctrl</kbd> + <kbd>A</kbd> <kbd>C</kbd> <kbd>X</kbd> <kbd>V</kbd> Roll: select all, copy, cut, paste at the playhead</p>
+        <p><kbd>Q</kbd> Roll: quantize the selection (or every note)</p>
+        <p><kbd>H</kbd> Hear the selected note</p>
+        <p><kbd>Del</kbd> Delete the selected note</p>
+      </div>
+          </div>
+        </details>
+      </div>
+    </footer>
+  </div>
 {% endblock %}
 
 {% block scripts %}
   <script src="{% static 'chords/piano-core.js' %}"></script>
   <script src="{% static 'chords/midihub.js' %}"></script>
+  <script src="{% static 'chords/studio-menu.js' %}"></script>
   <script src="{% static 'chords/studio.js' %}"></script>
 {% endblock %}

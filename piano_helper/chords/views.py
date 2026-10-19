@@ -14,20 +14,20 @@ from . import lessons, notation, scale_data
 
 # Fill these in to switch the matching buttons on. Empty = hidden.
 ABOUT_LINKS = {
-    "email": "yvesjerico@gmail.com",
-    "facebook": "facebook.com/yvesjerico.repayo/",
-    "youtube": "https://www.youtube.com/@tcsm0023",
-    "github": "https://github.com/TCsM23",
-    "linkedin": "https://linkedin.com/in/yves-jerico-repayo-72a593444",
-    "tip": "https://www.paypal.me/YJRepayo",      
-    "gcash_qr": True,  # set True after adding static/chords/support-qr.png
+    "email": "",
+    "facebook": "",
+    "youtube": "",
+    "github": "",
+    "linkedin": "",   # e.g. https://www.linkedin.com/in/your-name
+    "tip": "",        # your PayPal.me link
+    "gcash_qr": False,  # set True after adding static/chords/support-qr.png
 }
 
 # From your EmailJS dashboard. Leave empty to hide the message form.
 ABOUT_EMAILJS = {
-    "service": "service_j9t3wna",
-    "template": "template_q4x6tth",
-    "key": "aI14LXH9_lJrPbSQ5",
+    "service": "",
+    "template": "",
+    "key": "",
 }
 
 # Built-in songs. Each file goes in chords/static/chords/songs/. A song whose file is missing is hidden.
@@ -193,7 +193,7 @@ STUDIO_TRACKS = [
 def studio(request):
     return render(request, "chords/studio.html", {
         "tracks": STUDIO_TRACKS,
-        "steps": range(16),
+        "steps": range(24),
         "scales": [{"name": s["name"], "steps": s["steps"]} for s in scale_data.all_scales()],
     })
 

@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="{% static 'chords/piano.css' %}">
   <link rel="icon" type="image/png" href="{% static 'chords/favicon.svg' %}">
 </head>
-<body id="top">
+<body id="top" class="{% block body_class %}{% endblock %}">
   <div class="site-backdrop" aria-hidden="true">
     <div class="site-backdrop-glow"></div>
     <div class="site-backdrop-playhead"></div>
@@ -26,6 +26,7 @@
 
   <a class="site-skip-link" href="#main-content">Skip to content</a>
 
+  {% block site_header %}
   <header class="site-header-bar">
     <a class="site-header-brand" href="{% url 'chords:home' %}">
          <img class="site-header-logo" src="{% static 'chords/favicon.svg' %}" alt="header-icon">
@@ -56,11 +57,13 @@
       </button>
     </nav>
   </header>
+  {% endblock %}
 
   <main id="main-content" class="site-main-body">
     {% block content %}{% endblock %}
   </main>
 
+  {% block site_footer %}
   <footer class="site-footer-bar">
     <div class="site-footer-grid">
       <div class="site-footer-about">
@@ -110,6 +113,7 @@
       <a class="site-footer-top" href="#top">Back to top ↑</a>
     </div>
   </footer>
+  {% endblock %}
 
   <script src="{% static 'chords/nav.js' %}"></script>
   <script src="{% static 'chords/backdrop.js' %}"></script>

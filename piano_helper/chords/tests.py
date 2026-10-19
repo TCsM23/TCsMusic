@@ -139,3 +139,20 @@ class ScalesTests(TestCase):
         response = self.client.get(reverse("chords:studio"))
         self.assertContains(response, 'id="studio-scales-data"')
         self.assertContains(response, "Dorian")
+
+
+class StudioShellTests(TestCase):
+    def test_studio_is_one_screen_with_a_time_signature(self):
+        response = self.client.get(reverse("chords:studio"))
+        self.assertContains(response, 'id="studio-sig"')
+        self.assertContains(response, 'value="6/8"')
+        self.assertContains(response, 'id="studio-menu-open"')
+        self.assertContains(response, 'class="studio-page"')
+        # the site header and footer give way to the Studio's own bars
+        self.assertNotContains(response, "site-footer-bar")
+        self.assertNotContains(response, "site-header-bar")
+
+    def test_other_pages_keep_header_and_footer(self):
+        response = self.client.get(reverse("chords:home"))
+        self.assertContains(response, "site-header-bar")
+        self.assertContains(response, "site-footer-bar")

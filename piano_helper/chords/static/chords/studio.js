@@ -8,7 +8,9 @@
   const grid = $("studio-grid");
   if (!grid || !K) return;
 
-  const STEPS = 16;             // sixteenth notes in one bar
+  let STEPS = 16;               // sixteenth notes in one bar (set by the time signature)
+  let BEAT = 4;                 // sixteenth notes in one beat
+  const PATTERN_MAX = 24;       // the longest bar any time signature gives
   const LOOKAHEAD_MS = 25;      // how often the scheduler wakes up
   const SCHEDULE_AHEAD = 0.1;   // how far ahead (seconds) it plans sounds
   const STORE_KEY = "tcsmusic-studio";
@@ -48,13 +50,14 @@
   const freshMix = () => ({ vol: 0.8, pan: 0, mute: false, solo: false, rev: 0, del: 0, drive: 0, tone: 1 });
   const emptyPattern = () => {
     const p = {};
-    TRACK_IDS.forEach((id) => { p[id] = new Array(STEPS).fill(false); });
+    TRACK_IDS.forEach((id) => { p[id] = new Array(PATTERN_MAX).fill(false); });
     return p;
   };
 
   // ---------- data ----------
   // pattern.kick[3] === true means "play the kick on step 4"
   const S = {
+    sig: "4/4",
     bars: 1,
     tracks: [],     // each: { id, type, name, inst, notes, pedal, rollBase, release, sample, clips, pattern, builtin }
     active: "",     // the track you are working on
@@ -555,7 +558,7 @@
         });
       }
     });
-    if (e.live && S.metro && step % 4 === 0) click(e, time, step % STEPS === 0);
+    if (e.live && S.metro && step % BEAT === 0) click(e, time, step % STEPS === 0);
   }
 
   // jumping into the middle of a clip: start it part-way through
@@ -679,7 +682,7 @@
   function setRecording(on) {
     recording = on;
     recordButton.setAttribute("aria-pressed", String(on));
-    recordButton.textContent = on ? "● Recording" : "● Record";
+    recordButton.textContent = on ? "● Recording" : "● Rec";
   }
 
   // ---------- drawing the grid from the data ----------
@@ -699,7 +702,7 @@
   // ---------- remembering, and undo ----------
   function serialize() {
     return {
-      v: 2, bars: S.bars, snap: S.snap, bpm: Number(bpmInput.value), master: S.master, pads: S.pads, scale: S.scale,
+      v: 2, sig: S.sig, bars: S.bars, snap: S.snap, bpm: Number(bpmInput.value), master: S.master, pads: S.pads, scale: S.scale,
       sfx: S.sfx, metro: S.metro, nextId, mixer: S.mixer,
       tracks: S.tracks.map((t) => ({
         id: t.id, type: t.type, name: t.name, inst: t.inst, notes: t.notes, pedal: t.pedal, rollBase: t.rollBase,
@@ -778,6 +781,7 @@
     S.tracks = [];
     S.mixer = {};
     TRACK_IDS.forEach((id) => { S.mixer[id] = freshMix(); });
+    applySig(typeof saved.sig === "string" ? saved.sig : "4/4");
     S.bars = [1, 2, 4, 8, 16].includes(saved.bars) ? saved.bars : 1;
     const limit = totalSteps();
     const savedMix = saved.mixer || {};
@@ -804,7 +808,7 @@
             start: Math.max(0, Number(c.start) || 0), gain: clamp(c.gain === undefined ? 1 : Number(c.gain), 0, 2) }));
         if (t.type === "drums" && st.pattern) {
           TRACK_IDS.forEach((v) => {
-            if (Array.isArray(st.pattern[v])) for (let i = 0; i < STEPS; i++) t.pattern[v][i] = st.pattern[v][i] === true;
+            if (Array.isArray(st.pattern[v])) for (let i = 0; i < PATTERN_MAX; i++) t.pattern[v][i] = st.pattern[v][i] === true;
           });
         }
         t.builtin = st.builtin === true && t.id === "drums";
@@ -816,7 +820,7 @@
       const drums = newTrack("drums", "Drum Machine", "drums");
       drums.builtin = true;
       TRACK_IDS.forEach((v) => {
-        if (saved.pattern && Array.isArray(saved.pattern[v])) for (let i = 0; i < STEPS; i++) drums.pattern[v][i] = saved.pattern[v][i] === true;
+        if (saved.pattern && Array.isArray(saved.pattern[v])) for (let i = 0; i < PATTERN_MAX; i++) drums.pattern[v][i] = saved.pattern[v][i] === true;
       });
       const keys = newTrack("inst", "Keys");
       keys.notes = cleanNotes(saved.notes, limit);
@@ -870,6 +874,31 @@
     save();
   }
 
+  // ---------- time signature: how many sixteenths make a bar, and how they group into beats ----------
+  const SIGNATURES = { "2/4": [2, 4], "3/4": [3, 4], "4/4": [4, 4], "5/4": [5, 4], "6/8": [6, 8], "7/8": [7, 8], "12/8": [12, 8] };
+  const sigSelect = $("studio-sig");
+  function applySig(sig) {
+    if (!SIGNATURES[sig]) sig = "4/4";
+    const [num, den] = SIGNATURES[sig];
+    S.sig = sig;
+    BEAT = 16 / den;
+    STEPS = num * BEAT;
+    if (sigSelect) sigSelect.value = sig;
+    grid.style.setProperty("--steps", String(STEPS));
+    grid.querySelectorAll(".studio-grid-steps").forEach((row) => {
+      Array.from(row.children).forEach((btn, i) => {
+        btn.hidden = i >= STEPS;
+        btn.classList.toggle("is-beat", i % BEAT === 0);
+      });
+    });
+  }
+  function setSig(sig) {
+    applySig(sig);
+    setBars(S.bars);
+    paint();
+  }
+  if (sigSelect) sigSelect.addEventListener("change", () => setSig(sigSelect.value));
+
   function setBars(bars) {
     S.bars = bars;
     barsSelect.value = String(bars);
@@ -879,6 +908,7 @@
       t.pedal = t.pedal.filter((p) => p.start < limit).map((p) => ({ ...p, len: Math.min(p.len, limit - p.start) }));
     });
     if (sel || selSet.size) select(null);
+    dirty = true;
     if (playing) nextStep = nextStep % limit;
     if (resumeStep >= limit) resumeStep = 0;
     sizeRoll();
@@ -985,7 +1015,7 @@
   const rollScroll = $("studio-roll-scroll");
   const rollCtx = roll.getContext("2d");
   const LABEL_W = 58;
-  const ROW_H = 16;
+  let ROW_H = 16;     // grows or shrinks so all the rows fit the screen without scrolling
   const ROWS = 36;
   const HEAD = 22;     // the ruler along the top
   const FOOT = 28;     // the sustain pedal lane along the bottom
@@ -1007,6 +1037,8 @@
   const rollHeight = () => HEAD + rowsHeight() + FOOT;
 
   function sizeRoll() {
+    const room = rollScroll.clientHeight;
+    if (room > 0) ROW_H = clamp(Math.floor((room - HEAD - FOOT) / ROWS), 8, 26);
     const avail = Math.max(300, rollScroll.clientWidth - LABEL_W);
     stepW = Math.max(22, Math.floor(avail / totalSteps()));
     const w = LABEL_W + stepW * totalSteps();
@@ -1104,7 +1136,7 @@
     for (let s = 0; s <= totalSteps(); s++) {
       const x = LABEL_W + s * stepW + 0.5;
       rollCtx.strokeStyle = s % STEPS === 0 ? (light ? "rgba(80,10,12,0.6)" : "rgba(255,238,238,0.5)")
-        : s % 4 === 0 ? (light ? "rgba(80,10,12,0.3)" : "rgba(255,238,238,0.2)")
+        : s % BEAT === 0 ? (light ? "rgba(80,10,12,0.3)" : "rgba(255,238,238,0.2)")
         : (light ? "rgba(80,10,12,0.1)" : "rgba(255,238,238,0.07)");
       rollCtx.beginPath();
       rollCtx.moveTo(x, 0);
@@ -1135,7 +1167,7 @@
     rollCtx.font = "600 10px sans-serif";
     rollCtx.textBaseline = "middle";
     rollCtx.fillText("Bar", 8, HEAD / 2);
-    for (let s = 0; s <= totalSteps(); s += 4) {
+    for (let s = 0; s <= totalSteps(); s += BEAT) {
       const x = LABEL_W + s * stepW + 0.5;
       rollCtx.strokeStyle = light ? "rgba(80,10,12,0.4)" : "rgba(255,238,238,0.35)";
       rollCtx.beginPath();
@@ -1705,6 +1737,7 @@
       trackEls[trk.id] = { row, title, kind, mute, solo, vol, pan };
       syncMixerUi(trk.id);
     });
+    sizeLanes();
   }
 
   function refreshTrackLabels() {
@@ -1780,7 +1813,19 @@
     save();
   }
 
-  document.querySelectorAll(".studio-add-track-button").forEach((b) => b.addEventListener("click", () => addTrack(b.dataset.type)));
+  document.querySelectorAll(".studio-add-track-button").forEach((b) => b.addEventListener("click", () => { closeAddMenu(); if (b.dataset.type) addTrack(b.dataset.type); }));
+  const addOpen = $("studio-add-open");
+  const addMenu = $("studio-add-menu");
+  function closeAddMenu() { addMenu.hidden = true; addOpen.setAttribute("aria-expanded", "false"); }
+  addOpen.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const open = addMenu.hidden;
+    addMenu.hidden = !open;
+    if (open) { const r = addOpen.getBoundingClientRect(); addMenu.style.left = r.left + "px"; addMenu.style.top = r.bottom + 4 + "px"; }
+    addOpen.setAttribute("aria-expanded", String(open));
+  });
+  document.addEventListener("click", (event) => { if (!addMenu.hidden && !addMenu.contains(event.target)) closeAddMenu(); });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !addMenu.hidden) closeAddMenu(); });
   const importInput = $("studio-import-audio");
   if (importInput) {
     $("studio-import-button").addEventListener("click", () => importInput.click());
@@ -2066,9 +2111,9 @@
     for (let s = 0; s <= totalSteps(); s++) {
       const x = LABEL_W + s * stepW + 0.5;
       laneCtx.strokeStyle = s % STEPS === 0 ? (light ? "rgba(80,10,12,0.6)" : "rgba(255,238,238,0.5)")
-        : s % 4 === 0 ? (light ? "rgba(80,10,12,0.3)" : "rgba(255,238,238,0.2)") : (light ? "rgba(80,10,12,0.08)" : "rgba(255,238,238,0.06)");
+        : s % BEAT === 0 ? (light ? "rgba(80,10,12,0.3)" : "rgba(255,238,238,0.2)") : (light ? "rgba(80,10,12,0.08)" : "rgba(255,238,238,0.06)");
       laneCtx.beginPath();
-      laneCtx.moveTo(x, s % 4 === 0 ? HEAD - 7 : HEAD);
+      laneCtx.moveTo(x, s % BEAT === 0 ? HEAD - 7 : HEAD);
       laneCtx.lineTo(x, LANE_H);
       laneCtx.stroke();
     }
@@ -2170,6 +2215,8 @@
     const audioMode = (activeTrack() || {}).type === "audio";
     $("studio-roll-notes").hidden = audioMode;
     audioPanel.hidden = !audioMode;
+    const rollTab = document.querySelector('.studio-tab[data-tab="roll"]');
+    if (rollTab) rollTab.textContent = audioMode ? "Audio clips" : "Piano roll";
     if (tab === "roll") { sizeRoll(); sizeLane(); }
   }
 
@@ -2265,21 +2312,26 @@
 
   // ---------- tabs ----------
   let tab = "seq";
+  const PANEL_IDS = { seq: "studio-panel-seq", roll: "studio-panel-roll", mix: "studio-panel-mix", pads: "studio-panel-pads", keys: "studio-panel-keys", midi: "studio-midi" };
   function showTab(name) {
+    if (!PANEL_IDS[name]) name = "seq";
     tab = name;
     document.querySelectorAll(".studio-tab").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
-    ["seq", "roll", "mix"].forEach((t) => { $("studio-panel-" + t).hidden = t !== name; });
+    Object.keys(PANEL_IDS).forEach((t) => { $(PANEL_IDS[t]).hidden = t !== name; });
+    settingsBox.hidden = name !== "seq"; // the track's own controls sit above the sequencer; the roll needs the room
     if (name === "roll") updateRollMode();
+    // views that were hidden have no size yet: let them measure themselves now that they are showing
+    if (name === "keys") window.dispatchEvent(new Event("resize"));
     dirty = true;
   }
   document.querySelectorAll(".studio-tab").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
-  window.addEventListener("resize", () => { sizeProgress(); if (tab === "roll") { sizeRoll(); sizeLane(); } });
+  window.addEventListener("resize", () => { sizeProgress(); sizeLanes(); if (tab === "roll") { sizeRoll(); sizeLane(); } });
 
   // ---------- the progress bar: time, bars, and a strip you can click or drag to jump ----------
   const prog = $("studio-progress");
   const progCanvas = $("studio-progress-canvas");
   const progCtx = progCanvas.getContext("2d");
-  const PROG_H = 44;
+  const PROG_H = 30;
   let progDrag = false;
 
   function sizeProgress() {
@@ -2306,36 +2358,150 @@
     const x = (pos / total) * (w - 2) + 1;
     progCtx.clearRect(0, 0, w, PROG_H);
     progCtx.fillStyle = light ? "rgba(80,10,12,0.08)" : "rgba(255,238,238,0.07)";
-    progCtx.fillRect(0, 14, w, PROG_H - 14);
+    progCtx.fillRect(0, 0, w, PROG_H);
     progCtx.fillStyle = light ? "rgba(190,20,30,0.3)" : "rgba(255,59,59,0.3)";
-    progCtx.fillRect(0, 14, x, PROG_H - 14);
+    progCtx.fillRect(0, 0, x, PROG_H);
     progCtx.font = "600 10px sans-serif";
     progCtx.textBaseline = "top";
-    for (let s = 0; s < total; s += 4) {
+    for (let s = 0; s < total; s += BEAT) {
       const tx = (s / total) * (w - 2) + 1.5;
       const barLine = s % STEPS === 0;
       progCtx.strokeStyle = light ? "rgba(80,10,12,0.45)" : "rgba(255,238,238,0.4)";
       progCtx.beginPath();
-      progCtx.moveTo(tx, barLine ? 3 : 20);
+      progCtx.moveTo(tx, barLine ? 2 : 18);
       progCtx.lineTo(tx, PROG_H);
       progCtx.stroke();
       if (barLine && (total <= 64 || (s / STEPS) % 2 === 0)) {
         progCtx.fillStyle = light ? "#5a1a1f" : "#cdbdbd";
-        progCtx.fillText(String(s / STEPS + 1), tx + 3, 2);
+        progCtx.fillText(String(s / STEPS + 1), tx + 3, 3);
       }
     }
     progCtx.fillStyle = "#ff3b3b";
-    progCtx.fillRect(x - 1, 8, 2, PROG_H - 8);
+    progCtx.fillRect(x - 1, 10, 2, PROG_H - 10);
     progCtx.beginPath();
-    progCtx.moveTo(x - 6, 6);
-    progCtx.lineTo(x + 6, 6);
-    progCtx.lineTo(x, 15);
+    progCtx.moveTo(x - 6, 8);
+    progCtx.lineTo(x + 6, 8);
+    progCtx.lineTo(x, 17);
     progCtx.closePath();
     progCtx.fill();
     $("studio-time").textContent = clockText(pos * stepLength()) + " / " + clockText(total * stepLength());
-    $("studio-barpos").textContent = "Bar " + (Math.floor(pos / STEPS) + 1) + " · Beat " + (Math.floor((pos % STEPS) / 4) + 1);
+    $("studio-barpos").textContent = "Bar " + (Math.floor(pos / STEPS) + 1) + " · Beat " + (Math.floor((pos % STEPS) / BEAT) + 1);
     prog.setAttribute("aria-valuenow", String(Math.round((pos / total) * 100)));
+    drawLanes(w, pos);
   }
+
+  // ---------- the lanes: every track along the loop, lined up with the track list ----------
+  const lanes = $("studio-lanes");
+  const lanesCtx = lanes.getContext("2d");
+  const LANE_ROW_H = 56; // keep in step with --studio-row-h in the stylesheet
+  let lanesW = 0;
+
+  function sizeLanes() {
+    const w = Math.max(200, prog.clientWidth);
+    const h = Math.max(1, S.tracks.length) * LANE_ROW_H;
+    const dpr = window.devicePixelRatio || 1;
+    lanesW = w;
+    lanes.style.width = w + "px";
+    lanes.style.height = h + "px";
+    lanes.width = Math.round(w * dpr);
+    lanes.height = Math.round(h * dpr);
+    lanesCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    dirty = true;
+  }
+
+  function drawLanes(w, pos) {
+    if (!lanes.clientWidth) return;
+    if (w !== lanesW) sizeLanes();
+    const light = document.documentElement.dataset.theme === "light";
+    const total = totalSteps();
+    const H = S.tracks.length * LANE_ROW_H;
+    const px = (step) => (step / total) * (w - 2) + 1;
+    lanesCtx.clearRect(0, 0, w, H);
+    S.tracks.forEach((trk, i) => {
+      const top = i * LANE_ROW_H;
+      lanesCtx.fillStyle = trk.id === S.active ? (light ? "rgba(190,20,30,0.09)" : "rgba(255,59,59,0.10)") : (i % 2 ? (light ? "rgba(80,10,12,0.03)" : "rgba(255,238,238,0.02)") : "transparent");
+      lanesCtx.fillRect(0, top, w, LANE_ROW_H);
+      // bar lines
+      for (let st = 0; st < total; st += BEAT) {
+        lanesCtx.strokeStyle = st % STEPS === 0 ? (light ? "rgba(80,10,12,0.28)" : "rgba(255,238,238,0.22)") : (light ? "rgba(80,10,12,0.07)" : "rgba(255,238,238,0.06)");
+        lanesCtx.beginPath();
+        lanesCtx.moveTo(Math.round(px(st)) + 0.5, top);
+        lanesCtx.lineTo(Math.round(px(st)) + 0.5, top + LANE_ROW_H);
+        lanesCtx.stroke();
+      }
+      lanesCtx.strokeStyle = light ? "rgba(80,10,12,0.18)" : "rgba(255,238,238,0.12)";
+      lanesCtx.beginPath();
+      lanesCtx.moveTo(0, top + LANE_ROW_H - 0.5);
+      lanesCtx.lineTo(w, top + LANE_ROW_H - 0.5);
+      lanesCtx.stroke();
+      const pad = 8, inner = LANE_ROW_H - pad * 2;
+      if (trk.type === "drums") {
+        lanesCtx.fillStyle = light ? "rgba(190,20,30,0.85)" : "rgba(255,90,90,0.9)";
+        const voices = TRACK_IDS.length;
+        for (let rep = 0; rep < total / STEPS; rep++) {
+          TRACK_IDS.forEach((v, vi) => {
+            for (let st = 0; st < STEPS; st++) {
+              if (!trk.pattern[v][st]) continue;
+              const x = px(rep * STEPS + st);
+              lanesCtx.fillRect(x, top + pad + (vi / voices) * inner, Math.max(2, px(1) - px(0) - 1), Math.max(2, inner / voices - 1));
+            }
+          });
+        }
+      } else if (trk.type === "audio") {
+        trk.clips.forEach((c) => {
+          const buf = audio.buffers[c.bufferId];
+          const len = buf ? buf.duration / stepLength() : 4;
+          const x = px(c.start), cw = Math.max(3, px(c.start + len) - x);
+          lanesCtx.fillStyle = "rgba(90,200,170,0.3)";
+          lanesCtx.fillRect(x, top + pad, cw, inner);
+          const peaks = audio.peaks[c.bufferId];
+          if (peaks) {
+            lanesCtx.fillStyle = "rgba(160,255,230,0.9)";
+            const cols = Math.max(1, Math.floor(cw / 2));
+            for (let k = 0; k < cols; k++) {
+              const v = peaks[Math.min(peaks.length - 1, Math.floor((k / cols) * peaks.length))] * (c.gain === undefined ? 1 : c.gain);
+              const half = Math.min(inner / 2, v * (inner / 2));
+              lanesCtx.fillRect(x + k * 2, top + pad + inner / 2 - half, 1.4, Math.max(1, half * 2));
+            }
+          }
+          lanesCtx.strokeStyle = "rgba(90,200,170,0.9)";
+          lanesCtx.strokeRect(x + 0.5, top + pad + 0.5, cw - 1, inner - 1);
+        });
+      } else if (trk.notes.length) {
+        let lo = 127, hi = 0;
+        trk.notes.forEach((n) => { lo = Math.min(lo, n.midi); hi = Math.max(hi, n.midi); });
+        const span = Math.max(11, hi - lo);
+        trk.notes.forEach((n) => {
+          const y = top + pad + (1 - (n.midi - lo) / span) * (inner - 3);
+          lanesCtx.fillStyle = "hsla(" + (HUES[n.inst || trk.inst] || 355) + ",85%," + (light ? 40 : 60) + "%,0.95)";
+          lanesCtx.fillRect(px(n.start), y, Math.max(2, px(n.start + n.len) - px(n.start) - 1), 3);
+        });
+      }
+    });
+    if (playing || paused) {
+      const x = px(pos);
+      lanesCtx.fillStyle = "#ff3b3b";
+      lanesCtx.fillRect(x - 1, 0, 2, H);
+    }
+  }
+
+  // click a lane: jump there, and work on that track
+  let lanesDrag = false;
+  lanes.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || learning) return;
+    lanes.setPointerCapture(event.pointerId);
+    lanesDrag = true;
+    const rect = lanes.getBoundingClientRect();
+    const trk = S.tracks[clamp(Math.floor((event.clientY - rect.top) / LANE_ROW_H), 0, S.tracks.length - 1)];
+    if (trk && trk.id !== S.active) setActive(trk.id, true);
+    seek(clamp(((event.clientX - rect.left) / rect.width) * totalSteps(), 0, totalSteps() - 1));
+  });
+  lanes.addEventListener("pointermove", (event) => {
+    if (!lanesDrag) return;
+    const rect = lanes.getBoundingClientRect();
+    seek(clamp(((event.clientX - rect.left) / rect.width) * totalSteps(), 0, totalSteps() - 1));
+  });
+  ["pointerup", "pointercancel"].forEach((n) => lanes.addEventListener(n, () => { lanesDrag = false; }));
 
   function progStep(event) {
     const rect = prog.getBoundingClientRect();
@@ -2353,7 +2519,7 @@
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
       event.preventDefault();
       event.stopPropagation();
-      seek(position() + (event.key === "ArrowRight" ? 1 : -1) * (event.shiftKey ? STEPS : 4));
+      seek(position() + (event.key === "ArrowRight" ? 1 : -1) * (event.shiftKey ? STEPS : BEAT));
     }
   });
 
@@ -2868,7 +3034,7 @@
     const pattern = drumTrack().pattern;
     TRACK_IDS.forEach((id) => {
       const row = preset[id] || "";
-      for (let i = 0; i < STEPS; i++) pattern[id][i] = row.charAt(i) === "x";
+      for (let i = 0; i < PATTERN_MAX; i++) pattern[id][i] = row.charAt(i) === "x";
     });
     presetSelect.value = "";
     paint();
@@ -3014,6 +3180,7 @@
     dirty = true;
   }
 
+  applySig(S.sig);
   load();
   rebuildUi();
   hist.stack = [JSON.stringify(serialize())];
